@@ -1,0 +1,6 @@
+set(SDL2_IMAGE_INCLUDE_DIRS SDL2_image/include)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(SDL2_IMAGE_LIBRARIES ../SDL2_image/lib/x64/SDL2_image)
+else()
+  set(SDL2_IMAGE_LIBRARIES ../SDL2_image/lib/x86/SDL2_image)
+endif()

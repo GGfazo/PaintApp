@@ -1,0 +1,6 @@
+set(SDL2_TTF_INCLUDE_DIRS SDL2_ttf/include)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(SDL2_TTF_LIBRARIES ../SDL2_ttf/lib/x64/SDL2_ttf)
+else()
+  set(SDL2_TTF_LIBRARIES ../SDL2_ttf/lib/x86/SDL2_ttf)
+endif()

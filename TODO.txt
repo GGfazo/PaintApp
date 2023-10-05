@@ -1,0 +1,2 @@
+Implement dropdowns/multiple choice options (e.g: you're given multiple tools and can select them)
+Implement a tool system in the canvas (pencil + eraser + color getter + ...)
