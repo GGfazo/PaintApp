@@ -49,6 +49,8 @@ class ConstantText{
 class TextInputManager{
     public:
 
+    static void HandleEvent(SDL_Event *event){if(event->type == SDL_MOUSEBUTTONDOWN){UnsetRequester(mRequester);}}
+
     static void SetRequester(void *nRequester){mRequester = nRequester; SDL_StartTextInput();}
     static bool IsRequester(void *nRequester){return mRequester == nRequester;}
     static void UnsetRequester(void *nRequester){if(IsRequester(nRequester)) {mRequester = nullptr; SDL_StopTextInput();}}
@@ -58,7 +60,6 @@ class TextInputManager{
     static void* mRequester;
 };
 
-//TODO: add more costumability / flexibility
 class TextField{
     public:
 
@@ -172,6 +173,34 @@ class Slider{
     TextField mTextField;
 };
 
+class ChoicesArray{
+    public:
+
+    ChoicesArray(SDL_Rect nDimensions, int nButtonsSize);
+    
+    void AddOption(std::string texturePath);
+    void SetDimensions(SDL_Rect nDimensions);
+    SDL_Rect GetDimensions();
+
+    int GetLastChosenOption();
+
+    bool HandleEvent(SDL_Event *event);
+    void Draw(SDL_Renderer *pRenderer);
+
+    private:
+
+    SDL_Rect mDimensions; //The space that can be used by the buttons
+    int mButtonsSize; //The width and height of every button
+    std::vector<std::unique_ptr<SDL_Texture, PointerDeleter>> mTextures;
+    
+    int mLastChosen = 0;
+
+    bool mUpdateTextures = false; //If true, when Draw gets called, mTextures gets cleared and loaded with the ones from mTexturesPath 
+    std::vector<std::string> mTexturesPaths;
+
+    void UpdateTextures(SDL_Renderer *pRenderer);
+};
+
 class PositionPickerButton{
     public:
 
@@ -214,7 +243,7 @@ struct Pencil{
 
     //Determines how alpha values are calculated in soft pencils
     enum class AlphaCalculation{
-        LINEAR,     //The alpha value decreases linealy       (e.g: alpha = 1-distance/radius)
+        LINEAR = 0,     //The alpha value decreases linealy       (e.g: alpha = 1-distance/radius)
         QUADRATIC,  //The alpha value decreases quadratically (e.g: alpha = 1-pow(distance/radius, 2))
         EXPONENTIAL //The alpha value decreases exponentially (e.g: alpha = exp(e, -k*(distance/radius)), where k is a constant value)
     } alphaCalculation = AlphaCalculation::LINEAR;

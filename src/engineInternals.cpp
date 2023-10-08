@@ -64,6 +64,10 @@ Option::Option(InputMethod nInputMethod, SDL_Rect nDimensions, OptionInfo::Optio
 			input.mpSlider->SetValue(1.0f);
 			break;
 
+		case InputMethod::CHOICES_ARRAY:
+			input.mpChoicesArray = new ChoicesArray(SDL_Rect{MIN_SPACE, MIN_SPACE, mDimensions.w-2*MIN_SPACE, mDimensions.h-2*MIN_SPACE}, mDimensions.h-2*MIN_SPACE);
+			break;
+
 		case InputMethod::TICK:
 			input.mpTickButton = new TickButton(SDL_Rect{MIN_SPACE, MIN_SPACE, mDimensions.h-MIN_SPACE*2, mDimensions.h-MIN_SPACE*2});
 			break;
@@ -81,6 +85,10 @@ Option::~Option(){
 
 		case InputMethod::SLIDER:
 			delete input.mpSlider;
+			break;
+
+		case InputMethod::CHOICES_ARRAY:
+			delete input.mpChoicesArray;
 			break;
 
 		case InputMethod::TICK:
@@ -129,6 +137,11 @@ bool Option::HandleEvent(SDL_Event *event){
 		case InputMethod::SLIDER:
 			eventHandled = input.mpSlider->HandleEvent(event);
 			if(eventHandled && input.mpSlider->HasChanged()) mModified = true;
+			break;
+
+		case InputMethod::CHOICES_ARRAY:
+			eventHandled = input.mpChoicesArray->HandleEvent(event);
+			if(eventHandled) mModified = true;
 			break;
 
 		case InputMethod::TICK:
@@ -189,6 +202,10 @@ void Option::Draw(SDL_Renderer *pRenderer){
 			input.mpSlider->Draw(pRenderer);
 			break;
 
+		case InputMethod::CHOICES_ARRAY:
+			input.mpChoicesArray->Draw(pRenderer);
+			break;
+
 		case InputMethod::TICK:
 			input.mpTickButton->Draw(pRenderer);
 			break;
@@ -211,24 +228,41 @@ void Option::SetWidth(int nWidth){
 			input.mpSlider->SetWidth(std::max(nWidth-input.mpSlider->GetDimensions().x, MIN_SPACE));
 			break;
 
+		case InputMethod::CHOICES_ARRAY:{
+			SDL_Rect choicesArrayDimensions = input.mpChoicesArray->GetDimensions();
+			choicesArrayDimensions.w = nWidth;
+			input.mpChoicesArray->SetDimensions(choicesArrayDimensions);
+			break;
+		}
+
 		case InputMethod::TICK:
+			//We don't do anything as (currently) the height of the option determines the dimensions of the tick button
 			break;
 	}
 }
 
 void Option::SetHeight(int nHeight){
 	mDimensions.h = nHeight;
+	nHeight -= MIN_SPACE;
+	//TODO: (may) have a bool or some way to tell the owning window that the height has been changed so it can reorder the options height
 
 	switch(mInputMethod){
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
-			input.mpTextField->dimensions.h =  mDimensions.h;
+			input.mpTextField->dimensions.h = nHeight;
 			break;
 			
 		case InputMethod::SLIDER:{
 			SDL_Rect sliderDimensions = input.mpSlider->GetDimensions();
-			sliderDimensions.h = mDimensions.h;
+			sliderDimensions.h = nHeight;
 			input.mpSlider->SetDimensions(sliderDimensions);
+			break;
+		}
+
+		case InputMethod::CHOICES_ARRAY:{
+			SDL_Rect choicesArrayDimensions = input.mpChoicesArray->GetDimensions();
+			choicesArrayDimensions.h = nHeight;
+			input.mpChoicesArray->SetDimensions(choicesArrayDimensions);
 			break;
 		}
 
@@ -266,6 +300,13 @@ void Option::SetOptionText(const char *pNewText){
 			break;
 		}
 
+		case InputMethod::CHOICES_ARRAY:
+			SDL_Rect choicesArrayDimensions = input.mpChoicesArray->GetDimensions();
+			choicesArrayDimensions.x += MIN_SPACE + maxTextSpace;
+			choicesArrayDimensions.w -= MIN_SPACE + maxTextSpace;
+			input.mpChoicesArray->SetDimensions(choicesArrayDimensions);
+			break;
+
 		case InputMethod::TICK:
 			input.mpTickButton->dimensions.x += MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
 			break;
@@ -281,10 +322,13 @@ std::shared_ptr<OptionInfo> Option::GetData(){
 			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::COLOR, input.mpTextField->GetAsColor(nullptr)));
 
 		case InputMethod::WHOLE_TEXT_FIELD:
-			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::TEXT, std::string(input.mpTextField->GetText())));
+			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::TEXT, std::string(input.mpTextField->GetText()).c_str()));
 
 		case InputMethod::SLIDER:
-			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::VALUE, input.mpSlider->GetValue()));
+			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::REAL_VALUE, input.mpSlider->GetValue()));
+
+		case InputMethod::CHOICES_ARRAY:
+			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::WHOLE_VALUE, input.mpChoicesArray->GetLastChosenOption()));
 
 		case InputMethod::TICK:
 			return std::shared_ptr<OptionInfo>(new OptionInfo(mOptionID, OptionInfo::DataUsed::TICK, input.mpTickButton->GetValue()));
@@ -328,6 +372,7 @@ void Option::OptionCommands::LoadCommands(){
 	mCommandsMap->emplace("DefaultText", OptionCommands::SetDefaultText);
 	mCommandsMap->emplace("SliderMin", OptionCommands::SetMinValue);
 	mCommandsMap->emplace("SliderMax", OptionCommands::SetMaxValue);
+	mCommandsMap->emplace("AddChoice", OptionCommands::AddChoiceToArray);
 	mCommandsMap->emplace("OptionText", OptionCommands::SetOptionText);
 }
 
@@ -374,6 +419,15 @@ void Option::OptionCommands::SetMaxValue(Option *pOption, const std::string &nMa
 	}
 }
 
+void Option::OptionCommands::AddChoiceToArray(Option *pOption, const std::string &nDefaultText){
+	if(pOption->mInputMethod != Option::InputMethod::CHOICES_ARRAY){
+		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a choice array, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		return;
+	}
+
+	pOption->input.mpChoicesArray->AddOption(nDefaultText);
+}
+
 void Option::OptionCommands::SetDefaultText(Option *pOption, const std::string &nDefaultText){
 	if(pOption->mInputMethod != Option::InputMethod::WHOLE_TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::HEX_TEXT_FIELD){
 		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a textfield, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
@@ -392,13 +446,15 @@ void Option::OptionCommands::UnusableInfo(Option *pOption, const std::string &nU
 InternalWindow::InternalWindow(SDL_Renderer *pRenderer){
 	Option::OptionCommands::LoadCommands();
 
-	mOptions.reserve(4);
-	//TODO: load dimensions and extra info from a text file with lines in the next format ('[]' are used for concepts and '()' for aclarations):
+	mOptions.reserve(5);
+	//TODO: make extra info lines be in a text file
+	//Load extra info from lines in the next format ('[]' are used for concepts and '()' for aclarations):
 	//[ID(to verify the text to be correct)]_[extra info(literally)][\n]
 	mOptions.emplace_back(new Option(Option::InputMethod::HEX_TEXT_FIELD, SDL_Rect{0, 0, mDimensions.w-mInnerBorder*2, Option::MIN_SPACE*2+mDimensions.h/10-mInnerBorder/5}, OptionInfo::OptionIDs::DRAWING_COLOR, "0_DefaultText/Hex Color_OptionText/Color_"));
 	mOptions.emplace_back(new Option(Option::InputMethod::TICK, SDL_Rect{0, mOptions.back()->mDimensions.y + mOptions.back()->mDimensions.h, mDimensions.w-mInnerBorder*2, Option::MIN_SPACE*2+mDimensions.h/10-mInnerBorder/5}, OptionInfo::OptionIDs::HARD_OR_SOFT, "1_OptionText/Hard_"));
 	mOptions.emplace_back(new Option(Option::InputMethod::SLIDER, SDL_Rect{0, mOptions.back()->mDimensions.y + mOptions.back()->mDimensions.h, mDimensions.w-mInnerBorder*2, Option::MIN_SPACE*2+mDimensions.h/10-mInnerBorder/5}, OptionInfo::OptionIDs::PENCIL_RADIUS, "2_SliderMin/1_SliderMax/200_OptionText/Size_"));
 	mOptions.emplace_back(new Option(Option::InputMethod::SLIDER, SDL_Rect{0, mOptions.back()->mDimensions.y + mOptions.back()->mDimensions.h, mDimensions.w-mInnerBorder*2, Option::MIN_SPACE*2+mDimensions.h/10-mInnerBorder/5}, OptionInfo::OptionIDs::PENCIL_HARDNESS, "3_SliderMin/0_SliderMax/100_OptionText/Hardness_"));
+	mOptions.emplace_back(new Option(Option::InputMethod::CHOICES_ARRAY, SDL_Rect{0, mOptions.back()->mDimensions.y + mOptions.back()->mDimensions.h, mDimensions.w-mInnerBorder*2, Option::MIN_SPACE*2+mDimensions.h/10-mInnerBorder/5}, OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION, "4_AddChoice/Sprites/linear.png_AddChoice/Sprites/quadratic.png_AddChoice/Sprites/logarithmic.png_OptionText/Method_"));
 	
 	Option::OptionCommands::UnloadCommands();
 	
@@ -722,6 +778,9 @@ Uint32 AppManager::GetWindowID(){
 void AppManager::HandleEvent(SDL_Event *event){
 	bool hasBeenHandled = false;
 
+	//Just makes sure that the text input stops when any non text field is clicked
+	TextInputManager::HandleEvent(event);
+
 	for(auto &window : mpWindows){
 		if(!hasBeenHandled) hasBeenHandled = window->HandleEvent(event);
 	}
@@ -852,10 +911,13 @@ void AppManager::ProcessWindowsData(){
 					mpCanvas->pencil.pencilType = (option->data.tick ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
 					break;
 				case OptionInfo::OptionIDs::PENCIL_RADIUS:
-					mpCanvas->pencil.SetRadius((int)(option->data.value));
+					mpCanvas->pencil.SetRadius((int)(option->data.realValue));
 					break;
 				case OptionInfo::OptionIDs::PENCIL_HARDNESS:
-					mpCanvas->pencil.hardness = 0.01f*(option->data.value);
+					mpCanvas->pencil.hardness = 0.01f*(option->data.realValue);
+					break;
+				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:
+					mpCanvas->pencil.alphaCalculation = static_cast<Pencil::AlphaCalculation>(option->data.wholeValue);
 					break;
 				default:
 					ErrorPrint("Unable to tell the option id: "+std::to_string(static_cast<unsigned int>(option->optionID)));

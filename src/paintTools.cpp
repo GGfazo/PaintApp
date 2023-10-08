@@ -158,8 +158,6 @@ void TextField::Draw(SDL_Renderer *pRenderer){
 	int textW, textH; 
 	if(!mTextString.empty()) TTF_SizeUTF8(mpFont.get(), mTextString.c_str(), &textW, &textH);
 	else TTF_SizeUTF8(mpFont.get(), mBlankText.c_str(), &textW, &textH);
-
-	//TODO: change (aka make less specific)
 	
 	if(displayBackground){
 		SDL_Color background = {215, 215, 215};
@@ -425,6 +423,89 @@ void Slider::Draw(SDL_Renderer *pRenderer){
 	mTextField.Draw(pRenderer);
 
 	SDL_RenderSetViewport(pRenderer, &previousViewport);
+}
+
+//CHOICES_ARRAY METHODS:
+
+ChoicesArray::ChoicesArray(SDL_Rect nDimensions, int nButtonsSize) : mDimensions(nDimensions), mButtonsSize(nButtonsSize){}
+
+void ChoicesArray::AddOption(std::string texturePath){
+	mTexturesPaths.push_back(texturePath);
+	mUpdateTextures = true;
+}
+
+void ChoicesArray::SetDimensions(SDL_Rect nDimensions){
+	mDimensions = nDimensions;
+}
+
+SDL_Rect ChoicesArray::GetDimensions(){
+	return mDimensions;
+}
+
+int ChoicesArray::GetLastChosenOption(){
+	return mLastChosen;
+}
+
+bool ChoicesArray::HandleEvent(SDL_Event *event){
+	if(event->type == SDL_MOUSEBUTTONDOWN){
+		SDL_Point mousePos = {event->button.x, event->button.y};
+
+		SDL_Rect buttonSpace = {mDimensions.x, mDimensions.y , mButtonsSize*(int)floor(mDimensions.w/(float)mButtonsSize), mButtonsSize*(int)ceil(mDimensions.h/(float)mButtonsSize)};
+
+		if(SDL_PointInRect(&mousePos, &buttonSpace)){
+
+			//We calculate the index of the button in the clicked space
+			int deltaX = (mousePos.x - buttonSpace.x) / mButtonsSize;
+			int deltaY = (mousePos.y - buttonSpace.y) / mButtonsSize;
+			int newChosen = deltaY * floor(mDimensions.w/mButtonsSize) + deltaX;
+			
+			//We return false as the mouse click had no impact
+			if(newChosen >= mTextures.size()){
+				return false;
+			}
+			
+			//We set the previously chosen to its original color
+			SDL_SetTextureColorMod(mTextures[mLastChosen].get(), 255, 255, 255);
+			//We make the currently selected a bit darker
+			SDL_SetTextureColorMod(mTextures[newChosen].get(), 180, 180, 180);
+			
+			mLastChosen = newChosen;
+			return true;
+		}
+	}
+	return false;
+}
+
+void ChoicesArray::Draw(SDL_Renderer *pRenderer){
+	if(mUpdateTextures){
+		UpdateTextures(pRenderer);
+	}
+
+	SDL_Rect buttonRect = {mDimensions.x, mDimensions.y, mButtonsSize, mButtonsSize};
+
+	for(const auto &texture : mTextures){
+		SDL_RenderCopy(pRenderer, texture.get(), nullptr, &buttonRect);
+		
+		buttonRect.x += mButtonsSize;
+		if(buttonRect.x + mButtonsSize > mDimensions.x + mDimensions.w){
+			buttonRect.x = mDimensions.x;
+			buttonRect.y += mButtonsSize;
+
+			if(buttonRect.y >= mDimensions.y + mDimensions.h){
+				//As the button wouldn't display, we break out of the loop
+				break;
+			}
+		}
+	}
+}
+
+void ChoicesArray::UpdateTextures(SDL_Renderer *pRenderer){
+	mTextures.resize(mTexturesPaths.size());
+	for(int i = 0; i < mTexturesPaths.size(); ++i){
+		mTextures[i].reset(LoadTexture(mTexturesPaths[i].c_str(), pRenderer));
+	}
+	mTexturesPaths.clear();
+	mUpdateTextures = false;
 }
 
 //POSITION PICKER BUTTON METHODS:
@@ -866,6 +947,9 @@ void Canvas::HandleEvent(SDL_Event *event){
 		mHolded = false;
 	}
 	else if(event->type == SDL_KEYDOWN){
+		//We don't want to handle a key down if the text input is active, because that means a textfield is using the input
+		if(SDL_IsTextInputActive()) return;
+
 		switch(event->key.keysym.sym){
 			case SDLK_a: mDimensions.x++; break;
 			case SDLK_d: mDimensions.x--; break;

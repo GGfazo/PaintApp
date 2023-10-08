@@ -9,12 +9,14 @@ struct OptionInfo{
         DRAWING_COLOR = 0,
         HARD_OR_SOFT = 1,
         PENCIL_RADIUS = 2,
-        PENCIL_HARDNESS = 3
+        PENCIL_HARDNESS = 3,
+        SOFT_ALPHA_CALCULATION = 4
     };
     enum class DataUsed{
         TEXT,
         COLOR,
-        VALUE,
+        REAL_VALUE,
+        WHOLE_VALUE,
         TICK,
         NONE
     };
@@ -23,22 +25,25 @@ struct OptionInfo{
 
     const DataUsed dataUsed; //Determines which member from the Data union was assigned
 
+    //Might be rewritten into just a std::string that is interpreted depending on "dataUsed"
     union Data{ //The data needed to be transmited
-        const std::string text; //The text of a textfield, like a layer's name
+        const char* text; //The text of a textfield, like a layer's name
         const SDL_Color color; //The color of a textfield or from the image itself
-        const float value; //The value of a slider
+        const float realValue; //The decimal value of a slider
+        const int wholeValue; //The whole value of a choices array or a text
         const bool tick; //The value of a tickbutton
 
-        Data(std::string nText) : text(nText){};
+        Data(const char* nText) : text(nText){};
         Data(SDL_Color nColor) : color(nColor){};
-        Data(float nValue) : value(nValue){};
+        Data(float nRealValue) : realValue(nRealValue){};
+        Data(int nWholeValue) : wholeValue(nWholeValue){};
         Data(bool nTick) : tick(nTick){};
         ~Data(){}
     } data;
 
     OptionInfo() : optionID((OptionIDs)(-1)), dataUsed(DataUsed::NONE), data(false){}
     
-    template <typename T> requires std::same_as<T, std::string> || std::same_as<T, SDL_Color> || std::same_as<T, float> || std::same_as<T, bool>
+    template <typename T> requires std::is_constructible_v<Data, T>
     OptionInfo(OptionIDs nOptionID, DataUsed nDataUsed, T nData) : optionID(nOptionID), dataUsed(nDataUsed), data(nData){}
     
     /*OptionInfo(OptionIDs nOptionID, DataUsed nDataUsed, std::string nData) : optionID(nOptionID), dataUsed(nDataUsed), data(nData){}
@@ -57,6 +62,7 @@ class Option{
         HEX_TEXT_FIELD, //A text field in hexadecimal holding a color
         WHOLE_TEXT_FIELD, //A text field is used as input for numbers
         SLIDER, //A slider that can hold a value in a given range
+        CHOICES_ARRAY, //An array of buttons to choose a preference (eg: tools)
         TICK //A button that either has the value true or false is used as input
     };
 
@@ -93,6 +99,7 @@ class Option{
     union Input{
         TextField *mpTextField = nullptr;
         Slider *mpSlider;
+        ChoicesArray *mpChoicesArray;
         TickButton *mpTickButton;
     } input;
 
@@ -115,6 +122,7 @@ class Option{
         static void SetMinValue(Option *pOption, const std::string &nMin);
         static void SetMaxValue(Option *pOption, const std::string &nMax);
         static void SetDefaultText(Option *pOption, const std::string &nDefaultText);
+        static void AddChoiceToArray(Option *pOption, const std::string &nTexturePath);
         static void UnusableInfo(Option *pOption, const std::string &nUnusableInfo);
 
         private:
