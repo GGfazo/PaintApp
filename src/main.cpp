@@ -7,11 +7,10 @@
 bool InitializeDependencies();
 
 int main(int argc, char* args[]){
-    if(argc > 2 || !InitializeDependencies()) return -1;
+    if(!InitializeDependencies()) return -1;
 
 	{
 		AppManager appWindow = AppManager(1000, 500, SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED, "Tools");
-
 		MainLoop(appWindow, std::span{args, (size_t)argc});
 	}
 

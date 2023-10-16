@@ -28,5 +28,6 @@ if not exist SDL2_ttf.dll xcopy ..\..\SDL2_ttf\lib\x86\SDL2_ttf.dll .
 :ENDCOMPILE
 xcopy ..\..\Fonts .\Fonts /y /i
 xcopy ..\..\Sprites .\Sprites /y /i
+xcopy ..\..\InternalData .\InternalData /y /i
 START /W EditBMP.exe
 cd ../..

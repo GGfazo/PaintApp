@@ -56,25 +56,29 @@ TextField::~TextField(){
 }
 
 void TextField::SetText(std::string_view nTextString){
-	mUpdateText = true;
-		
+	std::string sanitizedString;
 	switch(mTextFormat){
 		case TextFormat::HEX:
 			//Sets 'mTextString' with all the digits from 'nTextString' that have a hexadecimal value and are part of the first 6 characters
-			mTextString = nTextString.substr(0, std::min(nTextString.find_first_not_of("0123456789abcdefABCDEF"), (size_t)6));
+			sanitizedString = nTextString.substr(0, std::min(nTextString.find_first_not_of("0123456789abcdefABCDEF"), (size_t)6));
 
 			bool isValidData;
-			SDL_Color nTextColor = GetAsColor(&isValidData);
+			SDL_Color nTextColor = GetAsColor(sanitizedString, &isValidData);
 			if(isValidData) mTextColor = nTextColor;
 
 			break;
 		case TextFormat::WHOLE_POSITIVE:
-			mTextString = nTextString.substr(0, nTextString.find_first_not_of("0123456789"));
+			sanitizedString = nTextString.substr(0, nTextString.find_first_not_of("0123456789"));
 			break;
 
 		case TextFormat::NONE:
-			mTextString = nTextString;
+			sanitizedString = nTextString;
 			break;
+	}
+
+	if(sanitizedString != mTextString){
+		mUpdateText = true;
+		mTextString = sanitizedString;
 	}
 }
 
@@ -270,6 +274,37 @@ SDL_Color TextField::GetAsColor(bool *isValidData){
 		rtColor.r = std::stoul(mTextString.substr(0, 2), nullptr, 16);
 		rtColor.g = std::stoul(mTextString.substr(2, 2), nullptr, 16);
 		rtColor.b = std::stoul(mTextString.substr(4, 2), nullptr, 16);
+	}
+
+	//We check if 'isValidData' is not a nullptr, and set it to the value of 'isHex'
+	if(isValidData) *isValidData = isHex;
+
+	return rtColor;
+}
+
+bool TextField::IsValidColor(std::string text){
+	if(text.size() != 6){
+		return false;
+	}
+
+	//Should always be true, as the format cannot be changed and is set to hex
+	for(const auto& digit : text){
+		if(!std::isxdigit(digit)){
+			return false;
+		}
+	}
+
+	return true;
+}
+
+SDL_Color TextField::GetAsColor(std::string text, bool *isValidData){
+	SDL_Color rtColor {0, 0, 0, SDL_ALPHA_OPAQUE};
+	bool isHex = IsValidColor(text);
+	
+	if(isHex){
+		rtColor.r = std::stoul(text.substr(0, 2), nullptr, 16);
+		rtColor.g = std::stoul(text.substr(2, 2), nullptr, 16);
+		rtColor.b = std::stoul(text.substr(4, 2), nullptr, 16);
 	}
 
 	//We check if 'isValidData' is not a nullptr, and set it to the value of 'isHex'
@@ -652,14 +687,11 @@ void PencilModifier::Draw(SDL_Renderer* pRenderer){
 
 //MUTABLE TEXTURE METHODS:
 
-MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height){
+MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor){
 	mpSurface.reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
     mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width, height));
 
-	SDL_Rect surfaceRect {0, 0, width, height};
-	SDL_FillRect(mpSurface.get(), &surfaceRect, 0xffffffff);
-
-	UpdateWholeTexture();
+	Clear(fillColor);
 }
 
 MutableTexture::MutableTexture(SDL_Renderer *pRenderer, const char *pImage){
@@ -677,6 +709,13 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel){
 	SDL_Color pixelColor;
 	SDL_GetRGBA(*UnsafeGetPixel(pixel), mpSurface->format, &pixelColor.r, &pixelColor.g, &pixelColor.b, &pixelColor.a);
 	return pixelColor;
+}
+
+void MutableTexture::Clear(const SDL_Color &clearColor){
+	SDL_Rect surfaceRect {0, 0, mpSurface->w, mpSurface->h};
+	SDL_FillRect(mpSurface.get(), &surfaceRect, SDL_MapRGBA(mpSurface->format, clearColor.r, clearColor.g, clearColor.b, 255));
+
+	UpdateWholeTexture();
 }
 
 void MutableTexture::SetPixel(SDL_Point pixel, const SDL_Color &color){
@@ -791,7 +830,7 @@ void MutableTexture::UpdateWholeTexture(){
 
 	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
 	
-	//Currently no need to call 'mChangedPixels.clear()', since this method is only called in the constructors
+	mChangedPixels.clear();
 }
 
 SDL_Rect MutableTexture::GetChangesRect(){
@@ -837,6 +876,10 @@ Canvas::~Canvas(){
 	if(saveOnDestroy) Save();
 }
 
+SDL_Color Canvas::GetColor(){
+	return mDrawColor;
+}
+
 void Canvas::SetColor(SDL_Color nDrawColor){
 	mDrawColor = nDrawColor;
 }
@@ -845,6 +888,7 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 	mLastMousePixel = localPixel;
 
 	SDL_Rect usedArea, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+
 	std::vector<Pencil::DrawPoint> pixelsToDraw = pencil.ApplyOn(localPixel, &usedArea);
 
 	if(!IsRectCompletelyInsideRect(usedArea, imageRect)){
@@ -869,6 +913,7 @@ void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
 		
     mLastMousePixel = localPixels.back();
 
+	//TODO: make faster (parallelize?)
 	for(const auto& pixel : localPixels){
 		std::vector<Pencil::DrawPoint> pixelsToDraw = pencil.ApplyOn(pixel, &usedArea);
 	
@@ -889,6 +934,14 @@ void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
 	}
 }
 
+void Canvas::Clear(std::optional<SDL_Color> clearColor){
+	if (clearColor.has_value()) {
+		mpImage->Clear(clearColor.value());
+	} else {
+		mpImage->Clear(mDrawColor);
+	}
+}
+
 void Canvas::SetSavePath(const char *nSavePath){
 	mSavePath = nSavePath;
 }
@@ -898,7 +951,8 @@ void Canvas::SetOffset(int offsetX, int offsetY){
 	mDimensions.y = offsetY;
 }
 
-void Canvas::SetResolution(int nResolution){
+void Canvas::SetResolution(float nResolution){
+	if(nResolution < M_MIN_RESOLUTION || nResolution > M_MAX_RESOLUTION) return;
 	mResolution = nResolution;
 
 	int nWidth = mpImage->GetWidth()*mResolution, nHeight = mpImage->GetHeight()*mResolution;
@@ -955,8 +1009,8 @@ void Canvas::HandleEvent(SDL_Event *event){
 			case SDLK_d: mDimensions.x--; break;
 			case SDLK_w: mDimensions.y++; break;
 			case SDLK_s: mDimensions.y--; break;
-			case SDLK_e: SetResolution(mResolution+1); break;
-			case SDLK_q: if(mResolution > 1) SetResolution(mResolution-1); break;
+			case SDLK_e: SetResolution(mResolution+10.0f*M_MIN_RESOLUTION); break;
+			case SDLK_q: SetResolution(mResolution-10.0f*M_MIN_RESOLUTION); break;
 			case SDLK_p: Save(); break;
 		}
 	}
@@ -970,12 +1024,6 @@ void Canvas::HandleEvent(SDL_Event *event){
 }
 
 void Canvas::Update(float deltaTime){
-	//mInternalTimer += deltaTime;
-
-	if(mInternalTimer >= M_MAX_TIMER){
-		Save();
-	}
-
 	mpImage->UpdateTexture();
 }
 
@@ -1003,9 +1051,10 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 }
 
 void Canvas::Save(){
-	//We set the timer to 0, so it doesn't matter what calls it, when Save is called the timer until it gets called automatically gets reset
-	mInternalTimer = 0.0f;
-	
+	if(mSavePath.empty()){
+		return;
+	}
+
 	DebugPrint("About to save "+mSavePath);
 	
 	mpImage->Save(mSavePath.c_str());

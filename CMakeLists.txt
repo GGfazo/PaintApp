@@ -4,21 +4,20 @@ cmake_minimum_required(VERSION 3.23.1)
 set (CMAKE_CXX_STANDARD 20)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 
-project(RenderingPlayground)
+project(EditBMP)
 
 add_library(
 filesToAdd
-	src/engineInternals.cpp
-	src/engineInternals.hpp
-	src/logger.cpp
-	src/logger.hpp
-	src/paintTools.cpp
-	src/paintTools.hpp
-	src/renderLib.cpp
-	src/renderLib.hpp
-	src/main.cpp
+src/engineInternals.cpp
+src/engineInternals.hpp
+src/paintTools.cpp
+src/paintTools.hpp
+src/logger.cpp
+src/logger.hpp
+src/renderLib.cpp
+src/renderLib.hpp
+#Add here your extra code files 
 )
-set_target_properties(filesToAdd PROPERTIES LINKER_LANGUAGE CXX)
 
 SET(SDL2_DIR SDL2/cmake)
 find_package(SDL2 REQUIRED)

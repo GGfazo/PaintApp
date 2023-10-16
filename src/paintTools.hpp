@@ -6,8 +6,7 @@
 #include <vector>
 #include <span>
 #include <algorithm>
-
-#include <iostream>
+#include <optional>
 
 //For smart pointers usage
 struct PointerDeleter{
@@ -97,6 +96,9 @@ class TextField{
     //Currently only supports 6-byte hex color
     bool IsValidColor();
     SDL_Color GetAsColor(bool *isValidData);
+    
+    static bool IsValidColor(std::string text);
+    static SDL_Color GetAsColor(std::string text, bool *isValidData);
 
     private:
 
@@ -226,8 +228,8 @@ class PositionPickerButton{
     std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
 };
 
-inline SDL_Point GetPointCell(SDL_Point originalPoint, int cellSize){
-    return {originalPoint.x/cellSize, originalPoint.y/cellSize};
+inline SDL_Point GetPointCell(SDL_Point originalPoint, float cellSize){
+    return {(int)(originalPoint.x/cellSize), (int)(originalPoint.y/cellSize)};
 }
 
 struct Pencil{
@@ -290,10 +292,12 @@ class PencilModifier{
 class MutableTexture{
     public:
 
-    MutableTexture(SDL_Renderer *pRenderer, int width, int height);
+    MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255});
     MutableTexture(SDL_Renderer *pRenderer, const char *pImage);
 
     SDL_Color GetPixelColor(SDL_Point pixel);
+
+    void Clear(const SDL_Color &clearColor);
 
     //SetPixel methods. Both SetDrawnPixels blend the alpha of the pixel instead of just setting it
     void SetPixel(SDL_Point pixel, const SDL_Color &color);
@@ -354,15 +358,17 @@ class Canvas{
 
     ~Canvas();
 
+    SDL_Color GetColor();
     void SetColor(SDL_Color nDrawColor);
 
     //Like SetPixel and SetPixels but it uses the pencil and changes the value of mLastMousePixel
     void DrawPixel(SDL_Point localPixel);
     void DrawPixels(const std::vector<SDL_Point> &localPixels);
+    void Clear(std::optional<SDL_Color> clearColor = {});
 
     void SetSavePath(const char *nSavePath);
     void SetOffset(int offsetX, int offsetY);
-    void SetResolution(int nResolution);
+    void SetResolution(float nResolution);
 
     void HandleEvent(SDL_Event *event);
 
@@ -382,7 +388,8 @@ class Canvas{
     private:
 
     SDL_Rect mDimensions;
-    int mResolution = 1;
+    static constexpr float M_MIN_RESOLUTION = 0.01f, M_MAX_RESOLUTION = 100.0f;
+    float mResolution = 1;
     std::unique_ptr<MutableTexture> mpImage;
 
     //Every time it reaches 'M_MAX_TIMER', it saves the current image
