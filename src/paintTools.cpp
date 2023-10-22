@@ -952,8 +952,8 @@ void Canvas::SetOffset(int offsetX, int offsetY){
 }
 
 void Canvas::SetResolution(float nResolution){
-	if(nResolution < M_MIN_RESOLUTION || nResolution > M_MAX_RESOLUTION) return;
-	mResolution = nResolution;
+	//if(nResolution < M_MIN_RESOLUTION || nResolution > M_MAX_RESOLUTION) return;
+	mResolution = std::clamp(nResolution, M_MIN_RESOLUTION, M_MAX_RESOLUTION);
 
 	int nWidth = mpImage->GetWidth()*mResolution, nHeight = mpImage->GetHeight()*mResolution;
 
@@ -1046,6 +1046,8 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 	}
 
 	mpImage->DrawIntoRenderer(pRenderer, mDimensions);
+
+	//TODO: add pencil area previsualization
     
 	SDL_RenderSetViewport(pRenderer, nullptr);
 }

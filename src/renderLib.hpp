@@ -31,6 +31,9 @@ enum class Format
     TOTAL_FORMATS
 };
 
+//Retrieves the size of a png formated image
+SDL_Point GetSizeOfPNG(const char *path);
+
 //Frees the window and the renderer and stops dependenies, used by default in main.cpp 
 void Release(SDL_Window *&window, SDL_Renderer *&renderer);
 

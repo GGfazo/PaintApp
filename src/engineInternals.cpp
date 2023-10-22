@@ -473,7 +473,6 @@ InternalWindow::InternalWindow(SDL_Point optionsSize, InitializationData nData) 
 
 	mOptions.reserve(nData.dataAmount);
 
-	//TODO: make extra info lines be in a text file
 	int firstNewLine = nData.optionsInfo.find_first_of('\n');
 	ProcessWindowInfo(nData.optionsInfo.substr(0, firstNewLine));
 
@@ -891,6 +890,8 @@ std::shared_ptr<OptionInfo> MainBar::GetData(){
 
 int AppManager::mWidth;
 int AppManager::mHeight;
+int AppManager::mMaximumWidth = 1000;
+int AppManager::mMaximumHeight = 1000;
 std::shared_ptr<TTF_Font> AppManager::mpFont;
 int AppManager::mMainBarHeight;
 std::vector<std::unique_ptr<InternalWindow>> AppManager::mInternalWindows;
@@ -908,9 +909,9 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
     }
 
     mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE ));
-	mpFont.reset(LoadFont("Fonts/font.ttf", 54), PointerDeleter{});
 
 	NewCanvas(100, 100);
+	InitializeFromFile();
 
 	mMainBarHeight = 20;
 	mpMainBar.reset(new MainBar({0, 0, mWidth, mMainBarHeight}));
@@ -919,23 +920,28 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 }
 
 void AppManager::AddImage(const char* pImage){
+	SDL_Point pngSize = GetSizeOfPNG(pImage);
+	if(pngSize.x  <= 0 || pngSize.x > mMaximumWidth || pngSize.y <= 0 || pngSize.y > mMaximumHeight){
+		ErrorPrint(std::to_string(pngSize.x) + "x" + std::to_string(pngSize.y) + " are not valid dimensions (check maximum values)");
+		return;
+	}
+
 	mpCanvas.reset(new Canvas(mpRenderer.get(), pImage));
-	mpCanvas->viewport = {0, 0, mWidth, mHeight};
-	mpCanvas->pencil.SetRadius(3);
-	mpCanvas->CenterInViewport();
-	mpCanvas->SetResolution(std::min(mWidth/mpCanvas->GetImageSize().x, mHeight/mpCanvas->GetImageSize().y)/2+1);
-	mpCanvas->SetSavePath("save.png");
+	InitializeCanvas();
 }
 
 void AppManager::NewCanvas(int width, int height){
-	if(width <= 0) width = 100;
-	if(height <= 0) height = 100;
+	if(width <= 0 || width > mMaximumWidth){
+		ErrorPrint("Tried to set witdh to "+std::to_string(width)+" when it can only take values from 1 to "+std::to_string(mMaximumWidth)+". Setting it to 100");
+		width = 100;
+	}
+	if(height <= 0 || height> mMaximumHeight){
+		ErrorPrint("Tried to set height to "+std::to_string(height)+" when it can only take values from 1 to "+std::to_string(mMaximumHeight)+". Setting it to 100");
+		height = 100;
+	}
+	
 	mpCanvas.reset(new Canvas(mpRenderer.get(), width, height));
-	mpCanvas->viewport = {0, 0, mWidth, mHeight};
-	mpCanvas->pencil.SetRadius(3);
-	mpCanvas->CenterInViewport();
-	mpCanvas->SetResolution(std::min(mWidth/mpCanvas->GetImageSize().x, mHeight/mpCanvas->GetImageSize().y)/2+1);
-	mpCanvas->SetSavePath("save.png");
+	InitializeCanvas();
 }
 
 Canvas *AppManager::GetCanvas(){
@@ -952,7 +958,6 @@ void AppManager::HandleEvent(SDL_Event *event){
 	//Just makes sure that the text input stops when any non text field is clicked
 	TextInputManager::HandleEvent(event);
 
-	//TODO: make main bar handle event
 	hasBeenHandled = mpMainBar->HandleEvent(event);
 
 	ProcessMainBarData();
@@ -1070,6 +1075,75 @@ void AppManager::InitializeWindow(const std::string &windowName){
 	} else {
 		ErrorPrint("Could not open the file InternalData/"+windowName+".txt");
 	}
+}
+
+void AppManager::InitializeCanvas(){
+	mpCanvas->viewport = {0, mMainBarHeight, mWidth, (mHeight-mMainBarHeight)};
+	mpCanvas->pencil.SetRadius(3);
+	mpCanvas->CenterInViewport();
+	mpCanvas->SetResolution(std::min(mWidth/(float)mpCanvas->GetImageSize().x, (mHeight-mMainBarHeight)/(float)mpCanvas->GetImageSize().y)*0.9f);
+	mpCanvas->SetSavePath("save.png");
+}
+
+void AppManager::InitializeFromFile(){
+	//Current file holding the basic app data
+	std::ifstream initializationFile("InternalData/InitializationData.txt");
+	
+	if(initializationFile.is_open()){
+		std::string line;
+
+		while(!initializationFile.eof()){
+			std::getline(initializationFile, line, '\n');
+			
+			if(!line.empty()){
+				switch(line[0]){
+					//This character indicates that the rest of the line is a comment, so we just break
+					case '#': break;
+
+					//This character indicates that the font of the app is going to be specified
+					case 'F':
+						if(line[1] != ':'){
+							ErrorPrint("Could not read app's font, as the ':' after the 'F' is missing");
+						} else {
+							mpFont.reset(LoadFont("Fonts/"+line.substr(2), 72), PointerDeleter{});
+						}
+						break;
+					
+					//This character indicates the maximum width that the created canvas can have (to prevent crashes because of unsuficient memory)
+					case 'W':
+						if(line[1] != ':'){
+							ErrorPrint("Could not read app's maximum width, as the ':' after the 'W' is missing");
+						} else {
+							mMaximumWidth = stoi(line.substr(2));
+						}
+						break;
+
+					//This character indicates the maximum hieght that the created canvas can have (to prevent crashes because of unsuficient memory)
+					case 'H':
+						if(line[1] != ':'){
+							ErrorPrint("Could not read app's maximum height, as the ':' after the 'H' is missing");
+						} else {
+							mMaximumHeight = stoi(line.substr(2));
+						}
+						break;
+
+					//This character indicates the image that the program will open upon start
+					case 'I':
+						if(line[1] != ':'){
+							ErrorPrint("Could not read app's starting image, as the ':' after the 'I' is missing");
+						} else {
+							AddImage(line.substr(2).c_str());
+						}
+						break;
+				}
+			}
+		}
+
+	} else {
+		ErrorPrint("Could not open the file InternalData/InitializationData.txt");
+	}
+
+	initializationFile.close();
 }
 
 void AppManager::ProcessMainBarData(){

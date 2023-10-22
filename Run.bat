@@ -26,8 +26,15 @@ if not exist SDL2_ttf.dll xcopy ..\..\SDL2_ttf\lib\x86\SDL2_ttf.dll .
 
 ::And we copy the font and sprites folders (we don't use 'if not exist' in case of changes made to them) and start the project
 :ENDCOMPILE
+
+::Removes all the fonts, sprites and data from previous uses, to avoid accumulation of unused
+rmdir .\Fonts /S /Q 
+rmdir .\Sprites /S /Q 
+rmdir .\InternalData /S /Q 
+
 xcopy ..\..\Fonts .\Fonts /y /i
 xcopy ..\..\Sprites .\Sprites /y /i
 xcopy ..\..\InternalData .\InternalData /y /i
+
 START /W EditBMP.exe
 cd ../..

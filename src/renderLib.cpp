@@ -40,6 +40,72 @@ int RenderedWindow::GetWindowHeight(){
 	return windowsHeight;
 }
 
+SDL_Point GetSizeOfPNG(const char *path){
+	SDL_Point result = {0, 0};
+	std::ifstream png(path, std::ios::binary);
+
+	if(!png.is_open()){
+		std::cout << "\nCannot open png " << path << '\n';
+		return result;
+	}
+
+	//We check the first 8 bytes to make sure it is a png
+	{
+		unsigned char magicNumber[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+		unsigned char pngHeader[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+		png.read((char*)pngHeader, 8);
+	
+		for(int i = 0; i < 8; ++i){
+			if(pngHeader[i] != magicNumber[i]){
+				std::cout << '\n' << path << " is not a png\n";
+				return result;
+			}
+		}
+	}
+
+	//We check that the first chunk is the IHDR chunk and then read the width and height
+	{
+		unsigned char chunkLength[4] = {0, 0, 0, 0};
+		unsigned char chunkType[4] = {0, 0, 0, 0};
+
+		unsigned char IHDRLength[4] = {0x00, 0x00, 0x00, 0x0D};
+		unsigned char IHDRType[4] = {0x49, 0x48, 0x44, 0x52};
+
+		unsigned char readWidth[4] = {0, 0, 0, 0};
+		unsigned char readHeight[4] = {0, 0, 0, 0};
+
+		png.read((char*)chunkLength, 4);
+		png.read((char*)chunkType, 4);
+		png.read((char*)readWidth, 4);
+		png.read((char*)readHeight, 4);
+
+		//Check that the first chunk is the IHDR
+		for(int i = 0; i < 4; ++i){
+			if(chunkLength[i] != IHDRLength[i]){
+				std::cout << '\n' << path << " chunk length does not match\n";
+				return result;
+			}
+		}
+		for(int i = 0; i < 4; ++i){
+			if(chunkType[i] != IHDRType[i]){
+				std::cout << '\n' << path << " chunk type does not match\n";
+				return result;
+			}
+		}
+
+		//We set the result based on the read values
+		for(int i = 0; i < 4; ++i){
+			result.x |= (int)readWidth[i] << (8*(3-i));
+			result.y |= (int)readHeight[i] << (8*(3-i));
+		}
+	}
+
+	png.close();
+
+	return result;
+}
+
 void FreeSurface(SDL_Surface *surface){
 	SDL_FreeSurface(surface);
 	surface = nullptr;

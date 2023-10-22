@@ -1,0 +1,12 @@
+#The font used (not actually included in the open source, you can currently install it at https://download.gnome.org/sources/ttf-bitstream-vera/1.10/):
+#You can change the font to any other you may like (as long as its license apply), but have in mind it may make some text unreadable (because of space issue) 
+F:Vera.ttf
+
+#The maximum value for the width of the canvas
+W:1000
+
+#The maximum value for the height of the canvas
+H:1000
+
+#This is the image the program will open upon start
+#I:Test.png

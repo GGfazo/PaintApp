@@ -308,6 +308,9 @@ class AppManager{
     static int mWidth;
     static int mHeight;
 
+    static int mMaximumWidth;
+    static int mMaximumHeight;
+
     static std::shared_ptr<TTF_Font> mpFont;
 
     std::unique_ptr<SDL_Window, PointerDeleter> mpWindow;
@@ -321,6 +324,9 @@ class AppManager{
     std::unique_ptr<MainBar> mpMainBar;
     static std::vector<std::unique_ptr<InternalWindow>> mInternalWindows;
 
+    void InitializeCanvas();
+
+    void InitializeFromFile();
     void ProcessMainBarData();
     void ProcessWindowsData();
 };
