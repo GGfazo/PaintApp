@@ -130,6 +130,7 @@ class TickButton{
 
     void Draw(SDL_Renderer *pRenderer);
 
+    void SetValue(bool nValue);
     bool GetValue();
 
     private:
@@ -152,7 +153,7 @@ class Slider{
     void SetMinValue(float nMin);
     void SetMaxValue(float nMax);
     float GetValue();
-    
+
     //Returns true if the last SetValue gave a new value to mValue (aka nValue != mValue)
     bool HasChanged();
 
@@ -184,7 +185,12 @@ class ChoicesArray{
     void SetDimensions(SDL_Rect nDimensions);
     SDL_Rect GetDimensions();
 
+    //Returns false if it wasn't able to set mLastChosen
+    bool SetLastChosenOption(int nLastChosen);
     int GetLastChosenOption();
+
+    //Only sets mLastChosen, doesn't have any effect on the textures nor does it check for it to be in range
+    void UncheckedSetLastChosenOption(int nLastChosen);
 
     bool HandleEvent(SDL_Event *event);
     void Draw(SDL_Renderer *pRenderer);
@@ -258,6 +264,8 @@ struct Pencil{
     int GetRadius();
     void SetRadius(int nRadius);
     std::vector<DrawPoint> ApplyOn(SDL_Point pixel, SDL_Rect *usedArea);
+
+    void DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer);
 
     private:
 

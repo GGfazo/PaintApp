@@ -2,6 +2,7 @@
 #include "renderLib.hpp"
 #include "logger.hpp"
 #include <iomanip>
+#include <functional>
 
 void *TextInputManager::mRequester = nullptr;
 
@@ -338,6 +339,10 @@ void TickButton::Draw(SDL_Renderer *pRenderer){
 	SDL_RenderDrawRect(pRenderer, &dimensions);
 }
 
+void TickButton::SetValue(bool nValue){
+	mValue = nValue;
+}
+
 bool TickButton::GetValue(){
 	return mValue;
 }
@@ -372,7 +377,7 @@ SDL_Rect Slider::GetDimensions(){
 }
 
 void Slider::SetValue(float nValue){
-	//We set mValue to the new value, but adjusting it so that it only conserves the most important digits
+	//We adjusti it so that it only conserves the most important digits
 	nValue = std::round(std::pow(10, VALUE_DECIMAL_PLACES)*std::clamp(nValue, mMin, mMax))*std::pow(0.1f, VALUE_DECIMAL_PLACES);
 
 	//Then we check if the value has changed in any way
@@ -382,7 +387,7 @@ void Slider::SetValue(float nValue){
 	}
 	mValue = nValue;
 
-	//We set the filled dimensions width, but using the original value
+	//We set the filled dimensions width
 	mFilledDimensions.w = (int)(mDimensions.w * (nValue-mMin)/(mMax-mMin));
 
 	//We transform the value into a string and finally we get only the part we want (all digits except the decimal places that we do not want)
@@ -477,8 +482,31 @@ SDL_Rect ChoicesArray::GetDimensions(){
 	return mDimensions;
 }
 
+bool ChoicesArray::SetLastChosenOption(int nLastChosen){
+	if(nLastChosen >= mTextures.size()){
+		return true;
+	}
+
+	//We check that mLastChosen was valid in order to set the texture back to its original color mod
+	if(mLastChosen < mTextures.size()){
+		//We set the previously chosen to its original color
+		SDL_SetTextureColorMod(mTextures[mLastChosen].get(), 255, 255, 255);
+	}
+	
+	//We make the currently selected a bit darker
+	SDL_SetTextureColorMod(mTextures[nLastChosen].get(), 180, 180, 180);
+	
+	mLastChosen = nLastChosen;
+	
+	return false;
+}
+
 int ChoicesArray::GetLastChosenOption(){
 	return mLastChosen;
+}
+
+void ChoicesArray::UncheckedSetLastChosenOption(int nLastChosen){
+	mLastChosen = nLastChosen;
 }
 
 bool ChoicesArray::HandleEvent(SDL_Event *event){
@@ -494,18 +522,7 @@ bool ChoicesArray::HandleEvent(SDL_Event *event){
 			int deltaY = (mousePos.y - buttonSpace.y) / mButtonsSize;
 			int newChosen = deltaY * floor(mDimensions.w/mButtonsSize) + deltaX;
 			
-			//We return false as the mouse click had no impact
-			if(newChosen >= mTextures.size()){
-				return false;
-			}
-			
-			//We set the previously chosen to its original color
-			SDL_SetTextureColorMod(mTextures[mLastChosen].get(), 255, 255, 255);
-			//We make the currently selected a bit darker
-			SDL_SetTextureColorMod(mTextures[newChosen].get(), 180, 180, 180);
-			
-			mLastChosen = newChosen;
-			return true;
+			return SetLastChosenOption(newChosen);
 		}
 	}
 	return false;
@@ -539,8 +556,12 @@ void ChoicesArray::UpdateTextures(SDL_Renderer *pRenderer){
 	for(int i = 0; i < mTexturesPaths.size(); ++i){
 		mTextures[i].reset(LoadTexture(mTexturesPaths[i].c_str(), pRenderer));
 	}
+
 	mTexturesPaths.clear();
 	mUpdateTextures = false;
+	
+	//We call this function to update the colouring of the selected texture that was just resseted
+	SetLastChosenOption(mLastChosen);
 }
 
 //POSITION PICKER BUTTON METHODS:
@@ -630,6 +651,97 @@ std::vector<Pencil::DrawPoint> Pencil::ApplyOn(SDL_Point pixel, SDL_Rect *usedAr
 	}
 
 	return result;
+}
+
+void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer){
+	//We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
+	std::vector<SDL_Rect> rects;
+	int rectLength = 0;
+	SDL_Rect auxiliar = {0, 0, 0, 0};
+
+	//Currently, if the resolution is too low, we call the function, but with a bigger resolution and a smaller radius
+	if(resolution < 1.0f) {
+		int previousRadius = mRadius;
+
+		mRadius = (int)(mRadius*resolution);
+		//This derives from the following:
+		//FinalResolution = 1
+		//OriginalResolution * (x^n) = FinalResolution
+		//n = logBaseX(1/OriginalResolution)
+		//FinalRadius = OriginalRadius / (x^n)
+		//FinalRadius = OriginalRadius / (x^logBaseX(1/OriginalResolution))
+		//FinalRadius = OriginalRadius / (1 / OriginalResolution)
+		//FinalRadius = OriginalRadius * OriginalResolution
+		//TODO: feel good for yourself :)
+		
+		if(mRadius >= 1){
+			DrawPreview(center, 1.0f, pRenderer);
+		}
+
+		mRadius = previousRadius;
+
+		return;
+	}
+
+	//Just an aproximation
+	rects.reserve(mRadius*2);
+
+	//The method we use to round the coordinates, currently it seems like ceil produces the best looking results (aka with less gaps)
+	const std::function<float(float)> ROUND = ceilf;
+
+	auto addRects = [&center, &resolution, &ROUND](std::vector<SDL_Rect> &rects, int rectLength, SDL_Rect &auxiliar){
+		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+	};
+
+	int x = 1, y = mRadius;
+	int t1 = mRadius/16, t2;
+	
+	rects.emplace_back(center.x - (int)ROUND(resolution * mRadius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
+	rects.emplace_back(center.x + (int)ROUND(resolution * mRadius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
+	rects.emplace_back(center.x, center.y - (int)ROUND(resolution * mRadius), (int)ROUND(resolution), (int)ROUND(resolution));
+	rects.emplace_back(center.x, center.y + (int)ROUND(resolution * mRadius), (int)ROUND(resolution), (int)ROUND(resolution));
+	
+	while(y > x){
+		x++;
+		rectLength++;
+		t1 += x;
+		t2 = t1 - y;
+		if(t2 >= 0){
+			t1 = t2;
+			y--;
+
+			auxiliar.x = x-rectLength;
+			auxiliar.y = 1+y;
+			auxiliar.w = rectLength;
+			auxiliar.h = 1;
+			
+			addRects(rects, rectLength, auxiliar);
+
+			rectLength = 0;
+		} 
+	}
+	if(y == x){
+		auxiliar.x = x;
+		auxiliar.y = y;
+		auxiliar.w = 1;
+		auxiliar.h = 1;
+
+		rects.emplace_back(center.x + (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		rects.emplace_back(center.x + (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		rects.emplace_back(center.x - (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		rects.emplace_back(center.x - (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		
+	}
+	
+	SDL_SetRenderDrawColor(pRenderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRects(pRenderer, rects.data(), rects.size());
 }
 
 void Pencil::FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points){
@@ -1047,8 +1159,22 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 
 	mpImage->DrawIntoRenderer(pRenderer, mDimensions);
 
-	//TODO: add pencil area previsualization
-    
+	if(!mHolded || pencil.GetRadius() > 4){
+		SDL_Point mousePosition;
+		SDL_GetMouseState(&mousePosition.x, &mousePosition.y);
+
+		//We find the middle pixel
+		SDL_Rect intersectionRect;
+		if(SDL_IntersectRect(&mDimensions, &viewport, &intersectionRect) == SDL_FALSE) intersectionRect = mDimensions;
+		SDL_RenderSetViewport(pRenderer, &intersectionRect);
+
+		SDL_Point pixel = GetPointCell({mousePosition.x-(mDimensions.x), mousePosition.y-(mDimensions.y)}, mResolution);
+		pixel.x *= mResolution; pixel.y *= mResolution;
+		pixel.x -= intersectionRect.x-mDimensions.x; pixel.y -= intersectionRect.y-mDimensions.y;
+		
+		pencil.DrawPreview(pixel, mResolution, pRenderer);
+	}
+
 	SDL_RenderSetViewport(pRenderer, nullptr);
 }
 

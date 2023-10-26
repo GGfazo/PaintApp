@@ -139,6 +139,7 @@ class Option{
         
         static void HandleCommand(Option *pOption, std::string_view command);
 
+        static void SetInitialValue(Option *pOption, std::string_view nValue);
         static void SetOptionText(Option *pOption, std::string_view nOptionText);
         static void SetMinValue(Option *pOption, std::string_view nMin);
         static void SetMaxValue(Option *pOption, std::string_view nMax);
@@ -329,6 +330,26 @@ class AppManager{
     void InitializeFromFile();
     void ProcessMainBarData();
     void ProcessWindowsData();
+};
+
+class AppDataRequester{
+    public:
+
+    static void SetApp(AppManager *npMainApp);
+    static SDL_Color GetCanvasDrawingColor();
+    
+    static int GetCanvasWidth();
+    static int GetCanvasHeight();
+
+    static Pencil::PencilType GetPencilType();
+    static int GetPencilRadius();
+    static float GetPencilHardness();
+    static Pencil::AlphaCalculation GetPencilAlphaCalculation();
+
+    private:
+    
+    //We can use a pointer, since AppDataRequester is only thought to be used by elements inside AppManager, therefore the pointer should always be valid 
+    static AppManager *mpMainApp;
 };
 
 void MainLoop(AppManager &toolsWindow, std::span<char*> args);

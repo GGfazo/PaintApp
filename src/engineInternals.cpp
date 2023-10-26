@@ -318,10 +318,7 @@ void Option::HandleInfo(std::string_view info){
 	std::from_chars(info.data()+previousIndex, info.data()+currentIndex, optionID);
 	mOptionID = static_cast<OptionInfo::OptionIDs>(optionID);
 
-	//We set the index ready for the next info and declare i, the variable that will be used inside the loop 
 	previousIndex = currentIndex+1;
-
-	//We set the input method
 	currentIndex = info.find_first_of('_', previousIndex);
 	char inputMethod = info[previousIndex];
 
@@ -333,7 +330,7 @@ void Option::HandleInfo(std::string_view info){
 		case 'T':
 			SetInputMethod(Option::InputMethod::TICK); break;
 		case 'S':
-			SetInputMethod(Option::InputMethod::SLIDER); break;
+			SetInputMethod(Option::InputMethod::SLIDER); break;	
 		case 'C':
 			SetInputMethod(Option::InputMethod::CHOICES_ARRAY); break;
 		default:
@@ -395,6 +392,7 @@ void Option::OptionCommands::LoadCommands(){
 	mCommandsMap->emplace("SliderMax", OptionCommands::SetMaxValue);
 	mCommandsMap->emplace("AddChoice", OptionCommands::AddChoiceToArray);
 	mCommandsMap->emplace("OptionText", OptionCommands::SetOptionText);
+	mCommandsMap->emplace("InitialValue", OptionCommands::SetInitialValue);
 }
 
 void Option::OptionCommands::UnloadCommands(){
@@ -410,6 +408,34 @@ void Option::OptionCommands::HandleCommand(Option *pOption, std::string_view com
 	}
 }
 
+void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view nValue){
+	switch(pOption->mInputMethod){
+		case Option::InputMethod::HEX_TEXT_FIELD:
+		case Option::InputMethod::WHOLE_TEXT_FIELD:
+			pOption->input.mpTextField->SetText(nValue);
+			break;
+		case Option::InputMethod::SLIDER:{
+			float nSliderValue;
+			std::from_chars(nValue.data(), nValue.data()+nValue.size(), nSliderValue);
+			pOption->input.mpSlider->SetValue(nSliderValue);
+			break;
+		}
+		case Option::InputMethod::CHOICES_ARRAY:{
+			float nChosen;
+			std::from_chars(nValue.data(), nValue.data()+nValue.size(), nChosen);
+			pOption->input.mpChoicesArray->UncheckedSetLastChosenOption(nChosen);
+			break;
+		}
+		case Option::InputMethod::TICK:
+			pOption->input.mpTickButton->SetValue(nValue.size() == 1 && nValue[0] == 'T');
+			break;
+		default:
+			ErrorPrint("Option doesn't have a valid input method, value: "+std::string(nValue));
+			return;
+	}
+	pOption->mModified = true;
+}
+        
 void Option::OptionCommands::SetOptionText(Option *pOption, std::string_view nOptionText){
 	pOption->SetOptionText(std::string(nOptionText.data(), nOptionText.data()+nOptionText.size()).c_str());
 }
@@ -1074,6 +1100,7 @@ void AppManager::InitializeWindow(const std::string &windowName){
 		windowFile.close();
 	} else {
 		ErrorPrint("Could not open the file InternalData/"+windowName+".txt");
+		return;
 	}
 }
 
@@ -1197,7 +1224,7 @@ void AppManager::ProcessWindowsData(){
 					break;
 				case OptionInfo::OptionIDs::NEW_CANVAS_CREATE:{
 					if(option->data.tick == false){
-						ErrorPrint("Data was false (should not happen)");
+						DebugPrint("Data was false (should only occur in internal window's creation)");
 						break;
 					}
 					auto &temporalData = mInternalWindows[i]->GetTemporalData();

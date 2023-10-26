@@ -1,4 +1,4 @@
 0_200_200_200_
-100_W_DefaultText/Width_OptionText/Width_
-101_W_DefaultText/Height_OptionText/Height_
-102_T_OptionText/Create_
+100_W_DefaultText/Width_OptionText/Width_InitialValue/100_
+101_W_DefaultText/Height_OptionText/Height_InitialValue/100_
+102_T_OptionText/Create_InitialValue/F_
