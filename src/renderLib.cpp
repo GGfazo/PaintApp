@@ -94,7 +94,7 @@ SDL_Point GetSizeOfPNG(const char *path){
 			}
 		}
 
-		//We set the result based on the read values
+		//We set the result based on the read values, we have to do it this way as it's in big endian
 		for(int i = 0; i < 4; ++i){
 			result.x |= (int)readWidth[i] << (8*(3-i));
 			result.y |= (int)readHeight[i] << (8*(3-i));
@@ -102,6 +102,33 @@ SDL_Point GetSizeOfPNG(const char *path){
 	}
 
 	png.close();
+
+	return result;
+}
+SDL_Point GetSizeOfBMP(const char *path){
+	SDL_Point result = {0, 0};
+	std::ifstream bmp(path, std::ios::binary);
+
+	if(!bmp.is_open()){
+		std::cout << "\nCannot open bmp" << path << '\n';
+		return result;
+	}
+
+	//TODO: check that it is indeed a bmp, we currently don't as I find there to be a lot of bmp formats. Currently using "Windows BITMAPINFOHEADER" and jumping straight into the size data
+	bmp.ignore(0x12);
+
+	{
+		char readWidth[4] = {0, 0, 0, 0};
+		char readHeight[4] = {0, 0, 0, 0};
+
+		bmp.read(readWidth, 4);
+		bmp.read(readHeight, 4);
+		
+		result.x = *(int*)readWidth;
+		result.y = *(int*)readHeight;
+	}
+
+	bmp.close();
 
 	return result;
 }

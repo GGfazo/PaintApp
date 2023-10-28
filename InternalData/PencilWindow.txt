@@ -1,4 +1,4 @@
-0_0_200_200_
+0_0_200_200_80_
 0_H_DefaultText/Hex Color_OptionText/Color_InitialValue/000000_
 1_T_OptionText/Hard_InitialValue/F_
 2_S_SliderMin/1_SliderMax/200_OptionText/Size_InitialValue/3_

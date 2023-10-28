@@ -7,8 +7,9 @@
 #include <span>
 #include <algorithm>
 #include <optional>
+#include <cmath>
 
-//For smart pointers usage
+//Destructors for smart pointers
 struct PointerDeleter{
     void operator()(SDL_Window *pWindow) const{ SDL_DestroyWindow(pWindow); }
     void operator()(SDL_Renderer *pRenderer) const{ SDL_DestroyRenderer(pRenderer); }
@@ -17,30 +18,41 @@ struct PointerDeleter{
     void operator()(TTF_Font *pFont) const{ TTF_CloseFont(pFont); }
 };
 
+//A class that holds and displays a given text. It can be moved and its dimensions can be resized
 class ConstantText{
     public:
 
-    //Maybe add option for color
+    //The constructor, takes the text that is going to get displayed and the font that will be used to create the texture when Draw is called for the first time
     ConstantText(const char *pText, std::shared_ptr<TTF_Font> pFont);
 
+    //Sets the internal text and font, and sets the flag that updates the texture in Draw
     void Reset(const char *pText, std::shared_ptr<TTF_Font> pFont);
 
-    void SetX(float x);
-    void SetY(float y);
-    void SetWidth(float nWidth);
-    void SetHeight(float nHeight);
-    float GetWidth();
+    //The next set of methods, modify or return the coordinates and sizes of the text 
+    void SetX(int x);
+    void SetY(int y);
+    //Setting the width or the height, accordingly sets the other using the internal text size so it doesn't look stetched
+    void SetWidth(int nWidth);
+    void SetHeight(int nHeight);
+    int GetWidth();
     SDL_Rect GetDimensions();
 
+    //Creates the texture, if needed, and displays the text into the renderer, on the set coordinates
     void Draw(SDL_Renderer *pRenderer);
 
     private:
 
+    //When set to true, calling draw will (once) create a texture from the text using the font
     bool mUpdateText = false;
+    //The text that gets displayed, in a string format. Used to allow the creation of the texture in Draw, instead of having to pass the renderer to the constructor / Reset method
     std::string mpActualText;
+    //The font used in order to create the texture. Used to allow the creation of the texture in Draw, instead of having to pass the renderer to the constructor / Reset method
     std::shared_ptr<TTF_Font> mpFont;
+    //The texture
     std::unique_ptr<SDL_Texture, PointerDeleter> mpTextTexture;
+    //The actual width and height in pixels of the texture
     SDL_Point mTextSize = {0, 0};
+    //The coordinates and sizes used for displaying the text
     SDL_Rect mDimensions = {0, 0, 0, 0};
 };
 
@@ -48,41 +60,59 @@ class ConstantText{
 class TextInputManager{
     public:
 
+    //This is called independantly, from the AppManager, in order to make sure that if a click occurs and no text field is affected by it, the click still results in the stop of text input
     static void HandleEvent(SDL_Event *event){if(event->type == SDL_MOUSEBUTTONDOWN){UnsetRequester(mRequester);}}
 
+    //Sets the current entity that is requesting for the text input to be active 
     static void SetRequester(void *nRequester){mRequester = nRequester; SDL_StartTextInput();}
+    //Verifies if the passed entity is the current requester 
     static bool IsRequester(void *nRequester){return mRequester == nRequester;}
+    //Unsets the passed entity as the requester. If it actually was the requester, requester is unset and the text input gets stopped
     static void UnsetRequester(void *nRequester){if(IsRequester(nRequester)) {mRequester = nullptr; SDL_StopTextInput();}}
 
     private:
     
+    //The entity that wants the text input to be active
     static void* mRequester;
 };
 
+//Represents a text field that gets displayed. The user can interact with it, via entering text, that can be retrieved by the app.
 class TextField{
     public:
 
+    //The text format determines what kind of input is allowed by the TextField and the means that the text can be retrieved as
     enum class TextFormat{
-        HEX,
-        WHOLE_POSITIVE,
+        HEX, //The text must have a length from 0 to 6, and only characters from 0 to 9 and a to f (upcase or downcase)
+        WHOLE_POSITIVE, //The text must be composed by characters from 0 to 9
         NONE
     };
 
+    //The coordinates and sizes used to display the text field
     SDL_Rect dimensions;
 
+    //If true, in Draw, before drawing the text, two simple grey rects will be displayed as a background for the text 
     bool displayBackground = true;
 
+    //The constructor takes a font, needed to create the texture; the text format, which will determine how the input is treated;
+    //and an optional blank text that gets displayed when the user has deleted all input
     TextField(std::shared_ptr<TTF_Font> npFont, TextFormat nTextFormat, const std::string& nBlankText = "");
     ~TextField();
 
     //Sets mTextString to the given string and updates the texture. Checks for format compability (wether it is hex, whole...)
+    //If the new text can be converted into a color by GetAsColor, then that color gets set
     void SetText(std::string_view nTextString);
+
+    //Sets the blank text that displays when there is no inputted info. Does not check for format compability
     void SetBlankText(std::string_view nBlankText);
     void SetTextFormat(TextFormat nTextFormat);
 
+    //Sets the color of the text (only the inputed text, has no effect in the blank text)
     void SetColor(SDL_Color nTextColor);
 
+    //Returns a string view to the inputted text
     std::string_view GetText();
+
+    //Returns true if the function text texture is going to get updated the next time Draw is called
     bool HasChanged();
 
     bool HandleEvent(SDL_Event *event);
@@ -97,22 +127,34 @@ class TextField{
     bool IsValidColor();
     SDL_Color GetAsColor(bool *isValidData);
     
+    //Performs the same operations as the non static methods, but on a specific string
     static bool IsValidColor(std::string text);
     static SDL_Color GetAsColor(std::string text, bool *isValidData);
 
     private:
 
+    //Determines the way input is handled and certain info is retrieved
     TextFormat mTextFormat;
     
     //Contains the text that gets displayed when the TextField is empty
     std::string mBlankText;
 
+    //Contains the text currently inputed into the TextField
     std::string mTextString;
+
+    //The font used to update the texture
     std::shared_ptr<TTF_Font> mpFont;
+    
+    //Used to handle text input
     bool mSelected = false;
+
+    //When true, Draw updates the  mpTextTexture
     bool mUpdateText = true;
+
+    //The texture of the text
     std::unique_ptr<SDL_Texture, PointerDeleter> mpTextTexture;
 
+    //The color used to draw the inputted text
     SDL_Color mTextColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
 };
 
@@ -234,8 +276,9 @@ class PositionPickerButton{
     std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
 };
 
+//We have to use floor, as just changing it into an int would drop the decimal place, making negative numbers erroneous
 inline SDL_Point GetPointCell(SDL_Point originalPoint, float cellSize){
-    return {(int)(originalPoint.x/cellSize), (int)(originalPoint.y/cellSize)};
+    return {(int)std::floor(originalPoint.x/cellSize), (int)std::floor(originalPoint.y/cellSize)};
 }
 
 struct Pencil{
@@ -265,7 +308,7 @@ struct Pencil{
     void SetRadius(int nRadius);
     std::vector<DrawPoint> ApplyOn(SDL_Point pixel, SDL_Rect *usedArea);
 
-    void DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer);
+    void DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE});
 
     private:
 
@@ -303,7 +346,7 @@ class MutableTexture{
     MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255});
     MutableTexture(SDL_Renderer *pRenderer, const char *pImage);
 
-    SDL_Color GetPixelColor(SDL_Point pixel);
+    SDL_Color GetPixelColor(SDL_Point pixel, bool *validValue = nullptr);
 
     void Clear(const SDL_Color &clearColor);
 
@@ -320,7 +363,8 @@ class MutableTexture{
 
     void DrawIntoRenderer(SDL_Renderer *pRenderer, const SDL_Rect &dimensions);
 
-    void Save(const char *pSavePath);
+    //Returns true if unable to save
+    bool Save(const char *pSavePath);
 
     int GetWidth();
     int GetHeight();
@@ -355,6 +399,8 @@ class Canvas{
     public:
 
     Pencil pencil;
+    SDL_Color pencilDisplayMainColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
+    SDL_Color pencilDisplayAlternateColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
 
     bool saveOnDestroy = true;
     SDL_Rect viewport;
@@ -365,6 +411,9 @@ class Canvas{
     Canvas(SDL_Renderer *pRenderer, const char *pLoadFile);
 
     ~Canvas();
+
+    void Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight);
+    void OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile);
 
     SDL_Color GetColor();
     void SetColor(SDL_Color nDrawColor);

@@ -21,21 +21,21 @@ void ConstantText::Reset(const char *pText, std::shared_ptr<TTF_Font> pFont){
 	mUpdateText = true;
 }
 
-void ConstantText::SetX(float x){
+void ConstantText::SetX(int x){
 	mDimensions.x = x;
 }
-void ConstantText::SetY(float y){
+void ConstantText::SetY(int y){
 	mDimensions.y = y;
 }
-void ConstantText::SetWidth(float nWidth){
+void ConstantText::SetWidth(int nWidth){
 	mDimensions.w = nWidth;
 	mDimensions.h = mTextSize.y*nWidth/mTextSize.x;
 }
-void ConstantText::SetHeight(float nHeight){
+void ConstantText::SetHeight(int nHeight){
 	mDimensions.h = nHeight;
 	mDimensions.w = mTextSize.x*nHeight/mTextSize.y;
 }
-float ConstantText::GetWidth(){
+int ConstantText::GetWidth(){
 	return mDimensions.w;
 }
 SDL_Rect ConstantText::GetDimensions(){
@@ -65,7 +65,7 @@ void TextField::SetText(std::string_view nTextString){
 
 			bool isValidData;
 			SDL_Color nTextColor = GetAsColor(sanitizedString, &isValidData);
-			if(isValidData) mTextColor = nTextColor;
+			if(isValidData) SetColor(nTextColor);
 
 			break;
 		case TextFormat::WHOLE_POSITIVE:
@@ -253,34 +253,11 @@ int TextField::GetAsNumber(bool *isValidData){
 }
 
 bool TextField::IsValidColor(){
-	if(mTextString.size() != 6 || mTextFormat != TextFormat::HEX){
-		return false;
-	}
-
-	//Should always be true, as the format cannot be changed and is set to hex
-	for(const auto& digit : mTextString){
-		if(!std::isxdigit(digit)){
-			return false;
-		}
-	}
-
-	return true;
+	return IsValidColor(mTextString);
 }
 
 SDL_Color TextField::GetAsColor(bool *isValidData){
-	SDL_Color rtColor {0, 0, 0, SDL_ALPHA_OPAQUE};
-	bool isHex = IsValidColor();
-	
-	if(isHex){
-		rtColor.r = std::stoul(mTextString.substr(0, 2), nullptr, 16);
-		rtColor.g = std::stoul(mTextString.substr(2, 2), nullptr, 16);
-		rtColor.b = std::stoul(mTextString.substr(4, 2), nullptr, 16);
-	}
-
-	//We check if 'isValidData' is not a nullptr, and set it to the value of 'isHex'
-	if(isValidData) *isValidData = isHex;
-
-	return rtColor;
+	return GetAsColor(mTextString, isValidData);
 }
 
 bool TextField::IsValidColor(std::string text){
@@ -653,7 +630,7 @@ std::vector<Pencil::DrawPoint> Pencil::ApplyOn(SDL_Point pixel, SDL_Rect *usedAr
 	return result;
 }
 
-void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer){
+void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer, SDL_Color previewColor){
 	//We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
 	std::vector<SDL_Rect> rects;
 	int rectLength = 0;
@@ -672,10 +649,9 @@ void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRend
 		//FinalRadius = OriginalRadius / (x^logBaseX(1/OriginalResolution))
 		//FinalRadius = OriginalRadius / (1 / OriginalResolution)
 		//FinalRadius = OriginalRadius * OriginalResolution
-		//TODO: feel good for yourself :)
 		
 		if(mRadius >= 1){
-			DrawPreview(center, 1.0f, pRenderer);
+			DrawPreview(center, 1.0f, pRenderer, previewColor);
 		}
 
 		mRadius = previousRadius;
@@ -740,7 +716,7 @@ void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRend
 		
 	}
 	
-	SDL_SetRenderDrawColor(pRenderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_SetRenderDrawColor(pRenderer, previewColor.r, previewColor.g, previewColor.b, previewColor.a);
 	SDL_RenderFillRects(pRenderer, rects.data(), rects.size());
 }
 
@@ -817,7 +793,15 @@ MutableTexture::MutableTexture(SDL_Renderer *pRenderer, const char *pImage){
 	UpdateWholeTexture();
 }
 
-SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel){
+SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
+	
+	if(IsPixelOutsideImage(pixel)){
+		if(validValue) *validValue = false;
+		return {0,0,0,0};
+	} else {
+		if(validValue) *validValue = true;
+	}
+
 	SDL_Color pixelColor;
 	SDL_GetRGBA(*UnsafeGetPixel(pixel), mpSurface->format, &pixelColor.r, &pixelColor.g, &pixelColor.b, &pixelColor.a);
 	return pixelColor;
@@ -916,10 +900,12 @@ void MutableTexture::DrawIntoRenderer(SDL_Renderer *pRenderer, const SDL_Rect &d
 	SDL_RenderCopy(pRenderer, mpTexture.get(), nullptr, &dimensions);
 }
 
-void MutableTexture::Save(const char *pSavePath){
+bool MutableTexture::Save(const char *pSavePath){
 	if(IMG_SavePNG(mpSurface.get(), pSavePath)){
 		ErrorPrint("Couldn't save image in file "+std::string(pSavePath));
+		return true;
 	}
+	return false;
 }
 
 int MutableTexture::GetWidth(){
@@ -986,6 +972,15 @@ Canvas::Canvas(SDL_Renderer *pRenderer, const char *pLoadFile) : mpImage(new Mut
 
 Canvas::~Canvas(){
 	if(saveOnDestroy) Save();
+}
+
+void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
+	mpImage.reset(new MutableTexture(pRenderer, nWidth, nHeight));
+	mDimensions = {0, 0, nWidth, nHeight};
+}
+void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
+	mpImage.reset(new MutableTexture(pRenderer, pLoadFile));
+	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
 }
 
 SDL_Color Canvas::GetColor(){
@@ -1163,16 +1158,24 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		SDL_Point mousePosition;
 		SDL_GetMouseState(&mousePosition.x, &mousePosition.y);
 
-		//We find the middle pixel
 		SDL_Rect intersectionRect;
 		if(SDL_IntersectRect(&mDimensions, &viewport, &intersectionRect) == SDL_FALSE) intersectionRect = mDimensions;
 		SDL_RenderSetViewport(pRenderer, &intersectionRect);
 
+		//We find the middle pixel
 		SDL_Point pixel = GetPointCell({mousePosition.x-(mDimensions.x), mousePosition.y-(mDimensions.y)}, mResolution);
+		
+		SDL_Color previewColor = pencilDisplayMainColor;
+		bool validColor = true;
+		SDL_Color pixelColor = mpImage->GetPixelColor(pixel, &validColor);
+		if(validColor && pixelColor.r + pixelColor.g + pixelColor.b <= 127*3){
+			previewColor = pencilDisplayAlternateColor;
+		}
+		
 		pixel.x *= mResolution; pixel.y *= mResolution;
 		pixel.x -= intersectionRect.x-mDimensions.x; pixel.y -= intersectionRect.y-mDimensions.y;
 		
-		pencil.DrawPreview(pixel, mResolution, pRenderer);
+		pencil.DrawPreview(pixel, mResolution, pRenderer, previewColor);
 	}
 
 	SDL_RenderSetViewport(pRenderer, nullptr);
@@ -1185,9 +1188,9 @@ void Canvas::Save(){
 
 	DebugPrint("About to save "+mSavePath);
 	
-	mpImage->Save(mSavePath.c_str());
-
-	DebugPrint("Saved "+mSavePath);
+	if(!mpImage->Save(mSavePath.c_str())){
+		DebugPrint("Saved "+mSavePath);
+	}
 }
 
 void Canvas::CenterInViewport(){

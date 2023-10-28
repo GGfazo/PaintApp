@@ -16,6 +16,10 @@ struct OptionInfo{
         NEW_CANVAS_WIDTH = 100,
         NEW_CANVAS_HEIGHT = 101,
         NEW_CANVAS_CREATE = 102,
+
+        SAVING_NAME = 200,
+        PENCIL_DISPLAY_MAIN_COLOR = 201,
+        PENCIL_DISPLAY_ALTERNATE_COLOR = 202
     };
     enum class DataUsed{
         TEXT,
@@ -79,6 +83,7 @@ class Option{
     public:
     SDL_Point clickedPoint = {0,0};
     enum class InputMethod{
+        TEXT_FIELD, //A text field for plain text, like a name
         HEX_TEXT_FIELD, //A text field in hexadecimal holding a color
         WHOLE_TEXT_FIELD, //A text field is used as input for numbers
         SLIDER, //A slider that can hold a value in a given range
@@ -86,7 +91,7 @@ class Option{
         TICK //A button that either has the value true or false is used as input
     };
 
-    Option(SDL_Rect nDimensions, std::string_view nInfo = "");
+    Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo = "");
     ~Option();
 
     bool HandleEvent(SDL_Event *event);
@@ -114,6 +119,9 @@ class Option{
     //This text displays next to the input to name the option
     std::unique_ptr<ConstantText> mOptionText; 
 
+    //The width dedicated to the display of text
+    const int M_TEXT_WIDTH;
+
     union Input{
         TextField *mpTextField = nullptr;
         Slider *mpSlider;
@@ -123,7 +131,6 @@ class Option{
 
     //TODO probably change, I don't think we just want to use hard coded values
     static constexpr int MIN_SPACE = 3;
-    static constexpr int OPTION_TEXT_WIDTH = 80;
 
     OptionInfo *GetData();
 
@@ -232,7 +239,8 @@ class InternalWindow{
         RIGHT
     };
 
-    void ProcessWindowInfo(std::string_view info);
+    //Returns the width dedicated to the text of each window's option
+    int ProcessWindowInfo(std::string_view info);
 
     void UpdateContentDimensions();
 
@@ -260,8 +268,10 @@ class MainBar{
     public:
 
     enum class MainOptionIDs : int{
-        CLEAR = 0,
-        NEW_CANVAS = 1
+        SAVE = 0,
+        CLEAR = 1,
+        NEW_CANVAS = 2,
+        PREFERENCES = 3
     };
 
     MainBar(SDL_Rect nDimensions);
@@ -284,7 +294,7 @@ class AppManager{
 
     AppManager(int nWidth, int nHeight, Uint32 nFlags = 0, const char* pWindowsName = "App window");
     
-    void AddImage(const char* pImage);
+    void AddImage(const std::string &imagePath);
     void NewCanvas(int width, int height);
     Canvas *GetCanvas();
 
@@ -331,7 +341,7 @@ class AppManager{
     void ProcessMainBarData();
     void ProcessWindowsData();
 };
-
+/*
 class AppDataRequester{
     public:
 
@@ -351,5 +361,5 @@ class AppDataRequester{
     //We can use a pointer, since AppDataRequester is only thought to be used by elements inside AppManager, therefore the pointer should always be valid 
     static AppManager *mpMainApp;
 };
-
+*/
 void MainLoop(AppManager &toolsWindow, std::span<char*> args);

@@ -1,0 +1,4 @@
+0_400_400_100_180_
+200_F_DefaultText/NewImage_OptionText/Image save name_InitialValue/NewImage_
+201_H_DefaultText/Hex color_OptionText/Pencil preview color_InitialValue/000000_
+202_H_DefaultText/Hex color_OptionText/Pencil preview color2_InitialValue/ffffff_

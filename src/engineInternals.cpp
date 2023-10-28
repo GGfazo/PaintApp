@@ -40,12 +40,13 @@ void MainLoop(AppManager &appWindow, std::span<char*> args){
 
 //OPTION METHODS:
 
-Option::Option(SDL_Rect nDimensions, std::string_view nInfo) : mDimensions(nDimensions){
+Option::Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo) : M_TEXT_WIDTH(nTextWidth), mDimensions(nDimensions){
 	HandleInfo(nInfo);
 }
 
 Option::~Option(){
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			delete input.mpTextField;
@@ -92,6 +93,10 @@ bool Option::HandleEvent(SDL_Event *event){
 	}
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
+			eventHandled = input.mpTextField->HandleEvent(event);
+			if(input.mpTextField->HasChanged()) mModified = true;
+			break;
 		case InputMethod::HEX_TEXT_FIELD:
 			eventHandled = input.mpTextField->HandleEvent(event);
 			if(input.mpTextField->HasChanged() && input.mpTextField->IsValidColor()) mModified = true;
@@ -151,7 +156,7 @@ void Option::Draw(SDL_Renderer *pRenderer){
 		SDL_Rect optionRect, textRect = mOptionText->GetDimensions();
 		SDL_RenderGetViewport(pRenderer, &optionRect);
 		
-		if(SDL_Rect adjustedDimensions = {optionRect.x, optionRect.y, textRect.x + OPTION_TEXT_WIDTH, textRect.y + textRect.h}, intersectionRect;
+		if(SDL_Rect adjustedDimensions = {optionRect.x, optionRect.y, textRect.x + M_TEXT_WIDTH, textRect.y + textRect.h}, intersectionRect;
 			SDL_IntersectRect(&previousViewport, &adjustedDimensions, &intersectionRect) == SDL_TRUE){
 			
 			SDL_RenderSetViewport(pRenderer, &intersectionRect);
@@ -161,6 +166,7 @@ void Option::Draw(SDL_Renderer *pRenderer){
 	}
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			input.mpTextField->Draw(pRenderer);
@@ -187,6 +193,7 @@ void Option::SetWidth(int nWidth){
 	nWidth -= MIN_SPACE;
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			input.mpTextField->dimensions.w = nWidth-input.mpTextField->dimensions.x;
@@ -215,6 +222,7 @@ void Option::SetHeight(int nHeight){
 	//TODO: (may) have a bool or some way to tell the owning window that the height has been changed so it can reorder the options height
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			input.mpTextField->dimensions.h = nHeight;
@@ -248,9 +256,10 @@ void Option::SetOptionText(const char *pNewText){
 	mOptionText->SetY(MIN_SPACE);
 	mOptionText->SetHeight(mDimensions.h-MIN_SPACE*2);
 	
-	int maxTextSpace = OPTION_TEXT_WIDTH;
+	int maxTextSpace = M_TEXT_WIDTH;
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			
@@ -286,11 +295,13 @@ OptionInfo *Option::GetData(){
 	else return new OptionInfo();
 
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
+			return new OptionInfo(mOptionID, OptionInfo::DataUsed::TEXT, std::string(input.mpTextField->GetText()));
+
 		case InputMethod::HEX_TEXT_FIELD:
 			return new OptionInfo(mOptionID, OptionInfo::DataUsed::COLOR, input.mpTextField->GetAsColor(nullptr));
 
 		case InputMethod::WHOLE_TEXT_FIELD:
-			//return new OptionInfo(mOptionID, OptionInfo::DataUsed::TEXT, std::string(input.mpTextField->GetText()));
 			return new OptionInfo(mOptionID, OptionInfo::DataUsed::WHOLE_VALUE, input.mpTextField->GetAsNumber(nullptr));
 
 		case InputMethod::SLIDER:
@@ -323,6 +334,8 @@ void Option::HandleInfo(std::string_view info){
 	char inputMethod = info[previousIndex];
 
 	switch(inputMethod){
+		case 'F':
+			SetInputMethod(Option::InputMethod::TEXT_FIELD); break;
 		case 'H':
 			SetInputMethod(Option::InputMethod::HEX_TEXT_FIELD); break;
 		case 'W':
@@ -352,6 +365,11 @@ void Option::HandleInfo(std::string_view info){
 void Option::SetInputMethod(Option::InputMethod nInputMethod){
 	mInputMethod = nInputMethod;
 	switch(mInputMethod){
+		case InputMethod::TEXT_FIELD:
+			input.mpTextField = new TextField(AppManager::GetAppFont(), TextField::TextFormat::NONE);
+			input.mpTextField->dimensions = {MIN_SPACE, MIN_SPACE, mDimensions.w-MIN_SPACE*2, mDimensions.h-MIN_SPACE*2};
+			input.mpTextField->SetColor({0, 0, 0});
+			break;
 		case InputMethod::HEX_TEXT_FIELD:
 			input.mpTextField = new TextField(AppManager::GetAppFont(), TextField::TextFormat::HEX);
 			input.mpTextField->dimensions = {MIN_SPACE, MIN_SPACE, mDimensions.w-MIN_SPACE*2, mDimensions.h-MIN_SPACE*2};
@@ -410,6 +428,7 @@ void Option::OptionCommands::HandleCommand(Option *pOption, std::string_view com
 
 void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view nValue){
 	switch(pOption->mInputMethod){
+		case Option::InputMethod::TEXT_FIELD:
 		case Option::InputMethod::HEX_TEXT_FIELD:
 		case Option::InputMethod::WHOLE_TEXT_FIELD:
 			pOption->input.mpTextField->SetText(nValue);
@@ -480,7 +499,7 @@ void Option::OptionCommands::AddChoiceToArray(Option *pOption, std::string_view 
 }
 
 void Option::OptionCommands::SetDefaultText(Option *pOption, std::string_view nDefaultText){
-	if(pOption->mInputMethod != Option::InputMethod::WHOLE_TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::HEX_TEXT_FIELD){
+	if(pOption->mInputMethod != Option::InputMethod::TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::WHOLE_TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::HEX_TEXT_FIELD){
 		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a textfield, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
 		return;
 	}
@@ -500,7 +519,7 @@ InternalWindow::InternalWindow(SDL_Point optionsSize, InitializationData nData) 
 	mOptions.reserve(nData.dataAmount);
 
 	int firstNewLine = nData.optionsInfo.find_first_of('\n');
-	ProcessWindowInfo(nData.optionsInfo.substr(0, firstNewLine));
+	int textWidth = ProcessWindowInfo(nData.optionsInfo.substr(0, firstNewLine));
 
 	int y = 0;
 	for(size_t i = firstNewLine+1, nextI; i < nData.optionsInfo.size(); i = nextI + 1){
@@ -511,7 +530,7 @@ InternalWindow::InternalWindow(SDL_Point optionsSize, InitializationData nData) 
 			nextI = nData.optionsInfo.size()-1;
 		}
 
-		mOptions.emplace_back(new Option(SDL_Rect{0, y, optionsSize.x-mInnerBorder*2, Option::MIN_SPACE*2+optionsSize.y-mInnerBorder*2}, nData.optionsInfo.substr(i, nextI-i)));	
+		mOptions.emplace_back(new Option(textWidth, SDL_Rect{0, y, optionsSize.x-mInnerBorder*2, Option::MIN_SPACE*2+optionsSize.y-mInnerBorder*2}, nData.optionsInfo.substr(i, nextI-i)));	
 		
 		y += mOptions.back()->mDimensions.h;
 	}
@@ -759,7 +778,7 @@ bool InternalWindow::MakeEventRelativeToRect(const SDL_Rect &dimensions, int &ev
 	return true;
 }
 
-void InternalWindow::ProcessWindowInfo(std::string_view info){
+int InternalWindow::ProcessWindowInfo(std::string_view info){
 	int i = 0, dimension;
 	
 	for(size_t firstIndex = 0, lastIndex; firstIndex < info.size(); firstIndex = lastIndex+1){
@@ -780,11 +799,15 @@ void InternalWindow::ProcessWindowInfo(std::string_view info){
 			case 1: mDimensions.y = dimension + AppManager::GetMinimumWindowY(); break;
 			case 2: mDimensions.w = dimension; break;
 			case 3: mDimensions.h = dimension; break;
+			case 4: return dimension; //The maximum width of the options' text
 			default: ErrorPrint("Too much data in the first line of window info"); break;
 		}
 
 		i++;
 	}
+
+	//This point shouldn't be reached if the string is correctly made
+	return -1;
 }
 
 void InternalWindow::UpdateContentDimensions(){
@@ -859,10 +882,16 @@ void MainOption::Draw(SDL_Renderer *pRenderer){
 
 MainBar::MainBar(SDL_Rect nDimensions) : mDimensions(nDimensions){
 	SDL_Rect selectionDimensions = {mDimensions.x, mDimensions.y, mDimensions.h*6, mDimensions.h}; 
+	mMainOptions.push_back(MainOption(selectionDimensions, "SAVE"));
+
+	selectionDimensions.x += selectionDimensions.w;
 	mMainOptions.push_back(MainOption(selectionDimensions, "CLEAR"));
 
 	selectionDimensions.x += selectionDimensions.w;
 	mMainOptions.push_back(MainOption(selectionDimensions, "NEW CANVAS"));
+
+	selectionDimensions.x += selectionDimensions.w;
+	mMainOptions.push_back(MainOption(selectionDimensions, "PREFERENCES"));
 }
  
 bool MainBar::HandleEvent(SDL_Event *pEvent){
@@ -902,8 +931,10 @@ void MainBar::Draw(SDL_Renderer *pRenderer){
 std::shared_ptr<OptionInfo> MainBar::GetData(){
 	if(mCurrentClickedIndex == -1) return std::shared_ptr<OptionInfo>(new OptionInfo());
 	else switch(mCurrentClickedIndex){
+		case static_cast<int>(MainOptionIDs::SAVE):
 		case static_cast<int>(MainOptionIDs::CLEAR):
 		case static_cast<int>(MainOptionIDs::NEW_CANVAS):
+		case static_cast<int>(MainOptionIDs::PREFERENCES):
 			return std::shared_ptr<OptionInfo>(new OptionInfo(static_cast<OptionInfo::OptionIDs>(mCurrentClickedIndex),  OptionInfo::DataUsed::TICK, true));
 		default:
 			ErrorPrint("Current clicked index could not be converted into a main option: "+std::to_string(mCurrentClickedIndex));
@@ -936,6 +967,9 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 
     mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE ));
 
+	mpCanvas.reset(new Canvas(mpRenderer.get(), 1, 1));
+	mpCanvas->viewport = {0, mMainBarHeight, mWidth, mHeight-mMainBarHeight};
+	mpCanvas->SetSavePath("save.png");
 	NewCanvas(100, 100);
 	InitializeFromFile();
 
@@ -945,15 +979,30 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 	InitializeWindow("PencilWindow");
 }
 
-void AppManager::AddImage(const char* pImage){
-	SDL_Point pngSize = GetSizeOfPNG(pImage);
-	if(pngSize.x  <= 0 || pngSize.x > mMaximumWidth || pngSize.y <= 0 || pngSize.y > mMaximumHeight){
-		ErrorPrint(std::to_string(pngSize.x) + "x" + std::to_string(pngSize.y) + " are not valid dimensions (check maximum values)");
+void AppManager::AddImage(const std::string &imagePath){
+
+	SDL_Point imageSize;
+	std::string imageFormat = imagePath.substr(imagePath.find_last_of('.'));
+	if(imageFormat == ".png"){
+		imageSize = GetSizeOfPNG(imagePath.c_str());
+		if(imageSize.x  <= 0 || imageSize.x > mMaximumWidth || imageSize.y <= 0 || imageSize.y > mMaximumHeight){
+			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check png corruption or app's maximum values)");
+			return;
+		}
+	} else if (imageFormat == ".bmp"){
+		imageSize = GetSizeOfBMP(imagePath.c_str());
+		if(imageSize.x  <= 0 || imageSize.x > mMaximumWidth || imageSize.y <= 0 || imageSize.y > mMaximumHeight){
+			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check bmp corruption or app's maximum values)");
+			return;
+		}
+	} else {
+		ErrorPrint("The image " + imagePath + " has the invalid format" + imageFormat);
 		return;
 	}
 
-	mpCanvas.reset(new Canvas(mpRenderer.get(), pImage));
-	InitializeCanvas();
+	mpCanvas->OpenFile(mpRenderer.get(), imagePath.c_str());
+	mpCanvas->CenterInViewport();
+	mpCanvas->SetResolution(std::min(mWidth/(float)mpCanvas->GetImageSize().x, (mHeight-mMainBarHeight)/(float)mpCanvas->GetImageSize().y)*0.9f);
 }
 
 void AppManager::NewCanvas(int width, int height){
@@ -961,13 +1010,14 @@ void AppManager::NewCanvas(int width, int height){
 		ErrorPrint("Tried to set witdh to "+std::to_string(width)+" when it can only take values from 1 to "+std::to_string(mMaximumWidth)+". Setting it to 100");
 		width = 100;
 	}
-	if(height <= 0 || height> mMaximumHeight){
+	if(height <= 0 || height > mMaximumHeight){
 		ErrorPrint("Tried to set height to "+std::to_string(height)+" when it can only take values from 1 to "+std::to_string(mMaximumHeight)+". Setting it to 100");
 		height = 100;
 	}
 	
-	mpCanvas.reset(new Canvas(mpRenderer.get(), width, height));
-	InitializeCanvas();
+	mpCanvas->Resize(mpRenderer.get(), width, height);
+	mpCanvas->CenterInViewport();
+	mpCanvas->SetResolution(std::min(mWidth/(float)mpCanvas->GetImageSize().x, (mHeight-mMainBarHeight)/(float)mpCanvas->GetImageSize().y)*0.9f);
 }
 
 Canvas *AppManager::GetCanvas(){
@@ -980,6 +1030,12 @@ Uint32 AppManager::GetWindowID(){
 
 void AppManager::HandleEvent(SDL_Event *event){
 	bool hasBeenHandled = false;
+
+	if(event->type == SDL_DROPFILE){
+		const char* sourceDir = event->drop.file;
+		AddImage(sourceDir);
+		return; //No other 
+    }
 
 	//Just makes sure that the text input stops when any non text field is clicked
 	TextInputManager::HandleEvent(event);
@@ -1104,14 +1160,6 @@ void AppManager::InitializeWindow(const std::string &windowName){
 	}
 }
 
-void AppManager::InitializeCanvas(){
-	mpCanvas->viewport = {0, mMainBarHeight, mWidth, (mHeight-mMainBarHeight)};
-	mpCanvas->pencil.SetRadius(3);
-	mpCanvas->CenterInViewport();
-	mpCanvas->SetResolution(std::min(mWidth/(float)mpCanvas->GetImageSize().x, (mHeight-mMainBarHeight)/(float)mpCanvas->GetImageSize().y)*0.9f);
-	mpCanvas->SetSavePath("save.png");
-}
-
 void AppManager::InitializeFromFile(){
 	//Current file holding the basic app data
 	std::ifstream initializationFile("InternalData/InitializationData.txt");
@@ -1182,13 +1230,17 @@ void AppManager::ProcessMainBarData(){
 	MainBar::MainOptionIDs mainOptionID = static_cast<MainBar::MainOptionIDs>(data->optionID);
 
 	switch(mainOptionID){
-		case MainBar::MainOptionIDs::CLEAR:{
+		case MainBar::MainOptionIDs::SAVE:
+			mpCanvas->Save();
+			break;
+		case MainBar::MainOptionIDs::CLEAR:
 			mpCanvas->Clear(SDL_Color{255, 255, 255});
 			break;
-		}
 		case MainBar::MainOptionIDs::NEW_CANVAS:
 			InitializeWindow("NewCanvasWindow");
 			break;
+		case MainBar::MainOptionIDs::PREFERENCES:
+			InitializeWindow("PreferencesWindow");
 		default:
 			ErrorPrint("Unable to tell the main option id: "+std::to_string(static_cast<int>(mainOptionID)));
 			break;
@@ -1245,6 +1297,15 @@ void AppManager::ProcessWindowsData(){
 
 					break;
 				}
+				case OptionInfo::OptionIDs::SAVING_NAME:
+					mpCanvas->SetSavePath((option->data.text + ".png").c_str());
+					break;
+				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:
+					mpCanvas->pencilDisplayMainColor = option->data.color;
+					break;
+				case OptionInfo::OptionIDs::PENCIL_DISPLAY_ALTERNATE_COLOR:
+					mpCanvas->pencilDisplayAlternateColor = option->data.color;
+					break;
 				default:
 					ErrorPrint("Unable to tell the option id: "+std::to_string(static_cast<int>(option->optionID)));
 					break;
