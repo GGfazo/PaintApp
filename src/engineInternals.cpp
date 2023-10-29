@@ -1241,6 +1241,7 @@ void AppManager::ProcessMainBarData(){
 			break;
 		case MainBar::MainOptionIDs::PREFERENCES:
 			InitializeWindow("PreferencesWindow");
+			break;
 		default:
 			ErrorPrint("Unable to tell the main option id: "+std::to_string(static_cast<int>(mainOptionID)));
 			break;
@@ -1298,7 +1299,8 @@ void AppManager::ProcessWindowsData(){
 					break;
 				}
 				case OptionInfo::OptionIDs::SAVING_NAME:
-					mpCanvas->SetSavePath((option->data.text + ".png").c_str());
+					if(option->data.text.empty()) mpCanvas->SetSavePath("NewImage.png");
+					else mpCanvas->SetSavePath((option->data.text + ".png").c_str());
 					break;
 				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:
 					mpCanvas->pencilDisplayMainColor = option->data.color;

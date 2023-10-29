@@ -81,6 +81,25 @@ void TextField::SetText(std::string_view nTextString){
 		mUpdateText = true;
 		mTextString = sanitizedString;
 	}
+
+	mCursor.SetPotition(std::clamp(mCursor.GetPosition(), 0, (int)mTextString.size()));
+}
+
+void TextField::AppendText(std::string_view toAppendText){
+	std::string resultingText = mTextString;
+	resultingText.insert(mCursor.GetPosition(), toAppendText);
+	
+	mCursor.IncreasePosition(0, INT_MAX, toAppendText.size());
+	SetText(resultingText);
+}
+
+void TextField::RemoveCharacters(int charactersAmount){
+	std::string resultingText = mTextString;
+	if(charactersAmount > mCursor.GetPosition()) charactersAmount = mCursor.GetPosition();
+	resultingText.erase(resultingText.begin()+(mCursor.GetPosition()-charactersAmount), resultingText.begin()+mCursor.GetPosition());
+
+	mCursor.DecreasePosition(0, mTextString.size(), charactersAmount);
+	SetText(resultingText);
 }
 
 void TextField::SetBlankText(std::string_view nBlankText){
@@ -127,14 +146,46 @@ bool TextField::HandleEvent(SDL_Event *event){
 
 		if (event->type == SDL_TEXTINPUT){
 
-			std::string nText = mTextString + event->text.text;
+			AppendText(event->text.text);
 
-			SetText(nText);
         	return true;
 
 		} else if (event->type == SDL_KEYDOWN){
+			bool isControlPressed = SDL_GetModState() & KMOD_CTRL;
 			switch(event->key.keysym.sym){
-				case SDLK_BACKSPACE: if(!mTextString.empty()) {mTextString.pop_back(); mUpdateText = true;} return true;
+				case SDLK_LEFT: 
+					if(isControlPressed){
+						size_t index = mTextString.find_last_of(' ', mCursor.GetPosition()-2);
+						if(mCursor.GetPosition() < 2) index = -1;
+						mCursor.DecreasePosition(0, mTextString.size(), mCursor.GetPosition() - 1 - index);
+					} else {
+						mCursor.DecreasePosition(0, mTextString.size());
+					}
+					break;
+				case SDLK_RIGHT:
+					if(isControlPressed){
+						size_t index = mTextString.find_first_of(' ', mCursor.GetPosition()+1);
+						mCursor.IncreasePosition(0, mTextString.size(), ((index == std::string::npos) ? mTextString.size() : index) - mCursor.GetPosition());
+					} else {
+						mCursor.IncreasePosition(0, mTextString.size());
+					}
+					break;
+				case SDLK_BACKSPACE:
+					if(!mTextString.empty()){
+						if(isControlPressed){
+							RemoveCharacters(mCursor.GetPosition() - mTextString.find_last_of(' ', mCursor.GetPosition()));
+						} else {
+							RemoveCharacters(1);
+						}
+					}
+					break;
+				case SDLK_v: 
+					if(isControlPressed){
+						char *pClipboardText = SDL_GetClipboardText();
+						AppendText(pClipboardText);
+						SDL_free(pClipboardText);
+					}
+					break;
 			}
 		}
 	}
@@ -147,10 +198,11 @@ void TextField::Update(float deltaTime){
 }
 
 void TextField::Draw(SDL_Renderer *pRenderer){
+	SDL_Rect cursorDimensions = {-1, -1, -1, -1};
 	if(mUpdateText){
 		if(!mTextString.empty()) mpTextTexture.reset(LoadTextureFromText(mTextString.c_str(), pRenderer, mpFont.get(), mTextColor));
 		//If the text is empty, it renders the blank text
-		else mpTextTexture.reset(LoadTextureFromText(mBlankText.c_str(), pRenderer, mpFont.get(), {150, 150, 150}));
+		else					 mpTextTexture.reset(LoadTextureFromText(mBlankText.c_str(), pRenderer, mpFont.get(), {150, 150, 150}));
 
 		mUpdateText = false; 
 	}
@@ -161,9 +213,13 @@ void TextField::Draw(SDL_Renderer *pRenderer){
 	}
 
 	int textW, textH; 
-	if(!mTextString.empty()) TTF_SizeUTF8(mpFont.get(), mTextString.c_str(), &textW, &textH);
-	else TTF_SizeUTF8(mpFont.get(), mBlankText.c_str(), &textW, &textH);
-	
+
+	if(!mTextString.empty()) {
+		TTF_SizeUTF8(mpFont.get(), mTextString.c_str(), &textW, &textH);
+	} else {
+		TTF_SizeUTF8(mpFont.get(), mBlankText.c_str(), &textW, &textH);
+	}
+
 	if(displayBackground){
 		SDL_Color background = {215, 215, 215};
 		if(mTextColor.r + mTextColor.g + mTextColor.b > 382) background = {50, 50, 50};
@@ -176,9 +232,8 @@ void TextField::Draw(SDL_Renderer *pRenderer){
 		SDL_RenderDrawRect(pRenderer, &displayRect);
 	}
 
-	const float xPadding = dimensions.h/6.25f;
-	//We set the x and y practically to 0 since we use a viewport
-	SDL_Rect textRect = {(int)xPadding, 0, (int)(textW*dimensions.h/textH), (int)dimensions.h};
+	const float TEXT_X_PADDING = dimensions.h/6.25f;
+	SDL_Rect textRect = {(int)TEXT_X_PADDING, 0, (textW*dimensions.h)/textH, dimensions.h};
 	
 	SDL_Rect previousViewport;
 	SDL_RenderGetViewport(pRenderer, &previousViewport);
@@ -189,6 +244,11 @@ void TextField::Draw(SDL_Renderer *pRenderer){
 	if(SDL_HasIntersection(&previousViewport, &realDimensions) == SDL_TRUE){
 		SDL_RenderSetViewport(pRenderer, &realDimensions);
 		SDL_RenderCopy(pRenderer, mpTextTexture.get(), nullptr, &textRect);
+
+		//Easy way of removing the cursor on sliders, may be changed into the future (maybe by changing what sliders use to display value in text, maybe by letting them be interactable, maybe doesnby having its own bool)
+		if(displayBackground && mSelected){
+			mCursor.Draw(pRenderer, mTextColor, dimensions.h, mpFont.get(), mTextString);
+		}
 
 		SDL_RenderSetViewport(pRenderer, &previousViewport);
 	}
@@ -289,6 +349,49 @@ SDL_Color TextField::GetAsColor(std::string text, bool *isValidData){
 	if(isValidData) *isValidData = isHex;
 
 	return rtColor;
+}
+
+//TEXTFIELD CURSOR METHODS
+
+TextField::Cursor::Cursor(int nPosition) : mPosition(nPosition){}
+            
+void TextField::Cursor::SetPotition(int nPosition){
+	mPosition = nPosition;
+}
+
+int TextField::Cursor::GetPosition(){
+	return mPosition;
+}
+
+void TextField::Cursor::DecreasePosition(int minPosition, int maxPosition, int amount){
+	mPosition -= amount;
+	if(mPosition < minPosition || mPosition > maxPosition){
+		mPosition = minPosition;
+	}
+}
+
+void TextField::Cursor::IncreasePosition(int minPosition, int maxPosition, int amount){
+	mPosition += amount;
+	if(mPosition < minPosition || mPosition > maxPosition){
+		mPosition = maxPosition;
+	}
+}
+
+void TextField::Cursor::Draw(SDL_Renderer* pRenderer, SDL_Color cursorColor, int height, TTF_Font *pFont, const std::string& text){
+	//May change into the future, making it a parametter or a constexpr function
+	const int TEXT_X_PADDING = height/6.25f;
+
+	SDL_Rect cursorDimensions = {TEXT_X_PADDING, 0, 2, height};
+
+	if(!text.empty()) {
+		int textW, textH;
+		TTF_SizeUTF8(pFont, text.substr(0, mPosition).c_str(), &textW, &textH);
+		cursorDimensions.x += (textW*height)/textH;
+	}
+
+	//We don't use the alpha value because it aready has no effect on the text
+	SDL_SetRenderDrawColor(pRenderer, cursorColor.r, cursorColor.g, cursorColor.b, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRect(pRenderer, &cursorDimensions);
 }
 
 //TICK BUTTON METHODS:

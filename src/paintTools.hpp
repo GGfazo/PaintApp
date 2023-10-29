@@ -102,6 +102,12 @@ class TextField{
     //If the new text can be converted into a color by GetAsColor, then that color gets set
     void SetText(std::string_view nTextString);
 
+    //Appends the given text, using the internal position of the cursor and updating it
+    void AppendText(std::string_view toAppendText);
+
+    //Removes a given amount of characters using the internal position of the cursor and updating it
+    void RemoveCharacters(int charactersAmount = 1);
+
     //Sets the blank text that displays when there is no inputted info. Does not check for format compability
     void SetBlankText(std::string_view nBlankText);
     void SetTextFormat(TextFormat nTextFormat);
@@ -132,6 +138,24 @@ class TextField{
     static SDL_Color GetAsColor(std::string text, bool *isValidData);
 
     private:
+
+    class Cursor{
+        public:
+
+            Cursor(int nPosition);
+
+            void SetPotition(int nPosition);
+            int GetPosition();
+            void DecreasePosition(int minPosition, int maxPosition, int amount = 1);
+            void IncreasePosition(int minPosition, int maxPosition, int amount = 1);
+
+            void Draw(SDL_Renderer* pRenderer, SDL_Color cursorColor, int height, TTF_Font *pFont, const std::string& text);
+
+        private:
+        
+            int mPosition;
+
+    } mCursor = Cursor(0);
 
     //Determines the way input is handled and certain info is retrieved
     TextFormat mTextFormat;
