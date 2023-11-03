@@ -1258,16 +1258,16 @@ void AppManager::ProcessWindowsData(){
 					mpCanvas->SetColor(option->data.color);
 					break;
 				case OptionInfo::OptionIDs::HARD_OR_SOFT:
-					mpCanvas->pencil.pencilType = (option->data.tick ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
+					mpCanvas->pencil.SetPencilType(option->data.tick ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
 					break;
 				case OptionInfo::OptionIDs::PENCIL_RADIUS:
 					mpCanvas->pencil.SetRadius((int)(option->data.realValue));
 					break;
 				case OptionInfo::OptionIDs::PENCIL_HARDNESS:
-					mpCanvas->pencil.hardness = 0.01f*(option->data.realValue);
+					mpCanvas->pencil.SetHardness(0.01f*(option->data.realValue));
 					break;
 				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:
-					mpCanvas->pencil.alphaCalculation = static_cast<Pencil::AlphaCalculation>(option->data.wholeValue);
+					mpCanvas->pencil.SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(option->data.wholeValue));
 					break;
 				case OptionInfo::OptionIDs::NEW_CANVAS_WIDTH:
 					mInternalWindows[i]->AddTemporalData(option.get());

@@ -173,7 +173,9 @@ bool TextField::HandleEvent(SDL_Event *event){
 				case SDLK_BACKSPACE:
 					if(!mTextString.empty()){
 						if(isControlPressed){
-							RemoveCharacters(mCursor.GetPosition() - mTextString.find_last_of(' ', mCursor.GetPosition()));
+						size_t index = mTextString.find_last_of(' ', mCursor.GetPosition()-2);
+						if(mCursor.GetPosition() < 2) index = -1;
+							RemoveCharacters(mCursor.GetPosition() - 1 - index);
 						} else {
 							RemoveCharacters(1);
 						}
@@ -681,51 +683,52 @@ void PositionPickerButton::Draw(SDL_Renderer *pRenderer){
 
 //PENCIL METHODS:
 
+void Pencil::SetRadius(int nRadius){
+	if(nRadius <= 1){
+		nRadius = 1;
+	}
+
+	//If the radius hasn't changed, we don't need to update the preview or circle
+	if(nRadius-1 != mRadius){
+		mRadius = nRadius-1;
+		UpdateCirclePixels();
+		UpdatePreviewRects();
+	}
+}
+
 int Pencil::GetRadius(){
 	return mRadius+1;
 }
 
-void Pencil::SetRadius(int nRadius){
-	if(nRadius <= 1){
-		mRadius = 0;
-	} else {
-		mRadius = nRadius-1;
-	}
+void Pencil::SetHardness(float nHardness){
+	mHardness = std::clamp(nHardness, 0.0f, 1.0f);
+	//If the pencil is hard, then hardness has no effect on the pixels alphas
+	if(mPencilType != PencilType::HARD) UpdateCircleAlphas();
+}
+
+float Pencil::GetHardness(){
+	return mHardness;
+}
+
+void Pencil::SetAlphaCalculation(AlphaCalculation nAlphaCalculation){
+	mAlphaCalculation = nAlphaCalculation;
+	//If the pencil is hard, then alpha calculation mode has no effect on the pixels alphas
+	if(mPencilType != PencilType::HARD) UpdateCircleAlphas();
+}
+
+void Pencil::SetPencilType(PencilType nPencilType){
+	mPencilType = nPencilType;
+	UpdateCircleAlphas();
 }
 
 std::vector<Pencil::DrawPoint> Pencil::ApplyOn(SDL_Point pixel, SDL_Rect *usedArea){
-	std::vector<DrawPoint> result;
-	if(mRadius >= 19){
-		result.reserve(3.4*mRadius*mRadius);
-	} else {
-		int16_t sizes[19]{1, 9, 21, 45, 69, 97, 145, 185, 241, 293, 357, 437, 505, 593, 673, 773, 877, 981, 1093};
-		result.reserve(sizes[mRadius]);
-	}
+	std::vector<Pencil::DrawPoint> result(mCirclePixels);
 
-	//Based on "Midpoint circle algorithm - Jesko's Method", but modified so that there are no repeating points
-    int x = 1, y = mRadius;
-	int t1 = mRadius/16, t2;
-	FillHorizontalLine(pixel.y, pixel.x-y, pixel.x+y, pixel, result);
-	while(y > x){
-		FillHorizontalLine(pixel.y+x, pixel.x-y, pixel.x+y, pixel, result);
-		FillHorizontalLine(pixel.y-x, pixel.x-y, pixel.x+y, pixel, result);
-
-		x++;
-		t1 += x;
-		t2 = t1 - y;
-		if(t2 >= 0){
-			int xMinus = x-1;
-			FillHorizontalLine(pixel.y+y, pixel.x-xMinus, pixel.x+xMinus, pixel, result);
-			FillHorizontalLine(pixel.y-y, pixel.x-(x-1), pixel.x+(x-1), pixel, result);
-			t1 = t2;
-			y--;
-		} 
+	for(auto &drawPoint : result){
+		drawPoint.pos.x += pixel.x;
+		drawPoint.pos.y += pixel.y;
 	}
-	if(y == x){
-		FillHorizontalLine(pixel.y+x, pixel.x-y, pixel.x+y, pixel, result);
-		FillHorizontalLine(pixel.y-x, pixel.x-y, pixel.x+y, pixel, result);
-	}
-
+	 
 	if(usedArea){
 		*usedArea = {pixel.x - mRadius, pixel.y - mRadius, 2*mRadius+1, 2*mRadius+1};
 	}
@@ -733,17 +736,116 @@ std::vector<Pencil::DrawPoint> Pencil::ApplyOn(SDL_Point pixel, SDL_Rect *usedAr
 	return result;
 }
 
-void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer, SDL_Color previewColor){
-	//We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
-	std::vector<SDL_Rect> rects;
-	int rectLength = 0;
-	SDL_Rect auxiliar = {0, 0, 0, 0};
+void Pencil::SetResolution(float nResolution){
+	mRectsResolution = nResolution;
+	UpdatePreviewRects();
+}
 
-	//Currently, if the resolution is too low, we call the function, but with a bigger resolution and a smaller radius
+void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color previewColor){	
+	SDL_SetRenderDrawColor(pRenderer, previewColor.r, previewColor.g, previewColor.b, previewColor.a);
+	
+	SDL_Rect *rects = new SDL_Rect[mPreviewRects.size()];
+
+	for(int i = 0; i < mPreviewRects.size(); ++i){
+		rects[i] = mPreviewRects[i];
+		rects[i].x += center.x;
+		rects[i].y += center.y;
+	}
+	
+	SDL_RenderFillRects(pRenderer, rects, mPreviewRects.size());
+
+	delete[] rects;
+}
+
+void Pencil::UpdateCirclePixels(){
+	mCirclePixels.clear();
+
+	SDL_Point center = {0, 0};
+	if(mRadius >= 19){
+		mCirclePixels.reserve(3.4*mRadius*mRadius);
+	} else {
+		int16_t sizes[19]{1, 9, 21, 45, 69, 97, 145, 185, 241, 293, 357, 437, 505, 593, 673, 773, 877, 981, 1093};
+		mCirclePixels.reserve(sizes[mRadius]);
+	}
+
+	//Based on "Midpoint circle algorithm - Jesko's Method", but modified so that there are no repeating points
+    int x = 1, y = mRadius;
+	int t1 = mRadius/16, t2;
+	FillHorizontalLine(center.y, center.x-y, center.x+y, center, mCirclePixels);
+	while(y > x){
+		FillHorizontalLine(center.y+x, center.x-y, center.x+y, center, mCirclePixels);
+		FillHorizontalLine(center.y-x, center.x-y, center.x+y, center, mCirclePixels);
+
+		x++;
+		t1 += x;
+		t2 = t1 - y;
+		if(t2 >= 0){
+			int xMinus = x-1;
+			FillHorizontalLine(center.y+y, center.x-xMinus, center.x+xMinus, center, mCirclePixels);
+			FillHorizontalLine(center.y-y, center.x-(x-1), center.x+(x-1), center, mCirclePixels);
+			t1 = t2;
+			y--;
+		} 
+	}
+	if(y == x){
+		FillHorizontalLine(center.y+x, center.x-y, center.x+y, center, mCirclePixels);
+		FillHorizontalLine(center.y-x, center.x-y, center.x+y, center, mCirclePixels);
+	}
+}
+
+void Pencil::UpdateCircleAlphas(){
+	for(auto &pixel : mCirclePixels){
+		SetPixelAlpha({0, 0}, pixel);
+	}
+}
+
+void Pencil::SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel){
+	if(mPencilType ==  PencilType::HARD){
+		pixel.alpha = SDL_ALPHA_OPAQUE;
+	
+	} else if(mPencilType ==  PencilType::SOFT){
+		float centerDistance = sqrt(pow(pixel.pos.x-center.x, 2) + pow(pixel.pos.y-center.y, 2));
+		float maxDistance = mRadius*mHardness;
+		Uint8 alpha;
+		
+		if(centerDistance <= maxDistance){
+			alpha = SDL_ALPHA_OPAQUE;
+		}
+		else switch(mAlphaCalculation){
+			case AlphaCalculation::LINEAR: 
+				alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-((centerDistance-maxDistance)/(1+mRadius-maxDistance))));
+				break;
+			case AlphaCalculation::QUADRATIC:
+				alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-pow((centerDistance-maxDistance)/(1+mRadius-maxDistance), 2)));
+				break;
+			case AlphaCalculation::EXPONENTIAL:
+				alpha = (Uint8)(SDL_ALPHA_OPAQUE * exp(-6*(centerDistance-maxDistance)/(1+mRadius-maxDistance)));
+				break;
+		}
+
+		pixel.alpha = alpha;
+	}
+}
+
+void Pencil::FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points){
+	for(int x = minX; x <= maxX; ++x){
+		DrawPoint newPixel = {x, y, 0};
+		SetPixelAlpha(circleCenter, newPixel);
+	
+		if(newPixel.alpha != 0) points.push_back(newPixel);
+	}
+}
+
+void Pencil::UpdatePreviewRects(){
+	mPreviewRects.clear();
+	
+	//Currently 0,0. When displaying, the mouse coordinates will be added
+	SDL_Point center = {0, 0};
+	
+	float resolution = mRectsResolution;
+	int radius = mRadius;
+
 	if(resolution < 1.0f) {
-		int previousRadius = mRadius;
-
-		mRadius = (int)(mRadius*resolution);
 		//This derives from the following:
 		//FinalResolution = 1
 		//OriginalResolution * (x^n) = FinalResolution
@@ -752,40 +854,38 @@ void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRend
 		//FinalRadius = OriginalRadius / (x^logBaseX(1/OriginalResolution))
 		//FinalRadius = OriginalRadius / (1 / OriginalResolution)
 		//FinalRadius = OriginalRadius * OriginalResolution
+		radius = (int)(radius*resolution);
 		
-		if(mRadius >= 1){
-			DrawPreview(center, 1.0f, pRenderer, previewColor);
-		}
-
-		mRadius = previousRadius;
-
-		return;
+		resolution = 1.0f;
 	}
 
+	SDL_Rect auxiliar = {0, 0, 0, 0}; //Doesn't actually require initialization 
+	int rectLength = 0;
+	
 	//Just an aproximation
-	rects.reserve(mRadius*2);
+	mPreviewRects.reserve(mRadius*2);
 
 	//The method we use to round the coordinates, currently it seems like ceil produces the best looking results (aka with less gaps)
 	const std::function<float(float)> ROUND = ceilf;
 
-	auto addRects = [&center, &resolution, &ROUND](std::vector<SDL_Rect> &rects, int rectLength, SDL_Rect &auxiliar){
-		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
-		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
-		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
-		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
-		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
-		rects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
-		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
-		rects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+	auto addRects = [&center, &resolution, &ROUND](std::vector<SDL_Rect> &mPreviewRects, int rectLength, SDL_Rect &auxiliar){
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), center.y - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.y),                    center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y + (int)ROUND(resolution * auxiliar.x),                    (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
 	};
 
-	int x = 1, y = mRadius;
-	int t1 = mRadius/16, t2;
+	int x = 1, y = radius;
+	int t1 = radius/16, t2;
 	
-	rects.emplace_back(center.x - (int)ROUND(resolution * mRadius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
-	rects.emplace_back(center.x + (int)ROUND(resolution * mRadius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
-	rects.emplace_back(center.x, center.y - (int)ROUND(resolution * mRadius), (int)ROUND(resolution), (int)ROUND(resolution));
-	rects.emplace_back(center.x, center.y + (int)ROUND(resolution * mRadius), (int)ROUND(resolution), (int)ROUND(resolution));
+	mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * radius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
+	mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * radius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
+	mPreviewRects.emplace_back(center.x, center.y - (int)ROUND(resolution * radius), (int)ROUND(resolution), (int)ROUND(resolution));
+	mPreviewRects.emplace_back(center.x, center.y + (int)ROUND(resolution * radius), (int)ROUND(resolution), (int)ROUND(resolution));
 	
 	while(y > x){
 		x++;
@@ -801,54 +901,16 @@ void Pencil::DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRend
 			auxiliar.w = rectLength;
 			auxiliar.h = 1;
 			
-			addRects(rects, rectLength, auxiliar);
+			addRects(mPreviewRects, rectLength, auxiliar);
 
 			rectLength = 0;
 		} 
 	}
 	if(y == x){
-		auxiliar.x = x;
-		auxiliar.y = y;
-		auxiliar.w = 1;
-		auxiliar.h = 1;
-
-		rects.emplace_back(center.x + (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
-		rects.emplace_back(center.x + (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
-		rects.emplace_back(center.x - (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
-		rects.emplace_back(center.x - (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
-		
-	}
-	
-	SDL_SetRenderDrawColor(pRenderer, previewColor.r, previewColor.g, previewColor.b, previewColor.a);
-	SDL_RenderFillRects(pRenderer, rects.data(), rects.size());
-}
-
-void Pencil::FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points){
-	for(int x = minX; x <= maxX; ++x){
-		if(pencilType ==  PencilType::HARD)
-			points.emplace_back(SDL_Point{x, y}, SDL_ALPHA_OPAQUE);
-		else if(pencilType ==  PencilType::SOFT){
-			int centerDistance = sqrt(pow(x-circleCenter.x, 2) + pow(y-circleCenter.y, 2));
-			float maxDistance = mRadius*hardness;
-			Uint8 alpha;
-			
-			if(centerDistance <= maxDistance){
-				alpha = SDL_ALPHA_OPAQUE;
-			}
-			else switch(alphaCalculation){
-				case AlphaCalculation::LINEAR: 
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-((centerDistance-maxDistance)/(1+mRadius-maxDistance))));
-					break;
-				case AlphaCalculation::QUADRATIC:
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-pow((centerDistance-maxDistance)/(1+mRadius-maxDistance), 2)));
-					break;
-				case AlphaCalculation::EXPONENTIAL:
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * exp(-6*(centerDistance-maxDistance)/(1+mRadius-maxDistance)));
-					break;
-			}
-
-			if(alpha != 0) points.emplace_back(SDL_Point{x, y}, alpha);
-		}
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
+		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
 	}
 }
 
@@ -1164,6 +1226,7 @@ void Canvas::SetOffset(int offsetX, int offsetY){
 void Canvas::SetResolution(float nResolution){
 	//if(nResolution < M_MIN_RESOLUTION || nResolution > M_MAX_RESOLUTION) return;
 	mResolution = std::clamp(nResolution, M_MIN_RESOLUTION, M_MAX_RESOLUTION);
+	pencil.SetResolution(mResolution);
 
 	int nWidth = mpImage->GetWidth()*mResolution, nHeight = mpImage->GetHeight()*mResolution;
 
@@ -1228,8 +1291,8 @@ void Canvas::HandleEvent(SDL_Event *event){
 		//TODO: Call change function assigned, this makes it so you can customize what value does the mouse wheel change
 		//It should also check the wheel is used inside the canvas viewport (no need to be in the canvas exactly), as otherwise it should operate on the hovered text if any
 
-		//pencil.SetRadius(pencil.GetRadius() + event->wheel.y);
-		pencil.hardness = std::clamp(pencil.hardness + event->wheel.y*0.1f, 0.0f, 1.0f);
+		//No need to clamp the value, as SetHardness already does that
+		pencil.SetHardness(pencil.GetHardness() + event->wheel.y*0.1f);
 	}
 }
 
@@ -1278,7 +1341,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		pixel.x *= mResolution; pixel.y *= mResolution;
 		pixel.x -= intersectionRect.x-mDimensions.x; pixel.y -= intersectionRect.y-mDimensions.y;
 		
-		pencil.DrawPreview(pixel, mResolution, pRenderer, previewColor);
+		pencil.DrawPreview(pixel, pRenderer, previewColor);
 	}
 
 	SDL_RenderSetViewport(pRenderer, nullptr);

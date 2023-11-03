@@ -310,29 +310,36 @@ struct Pencil{
     enum class PencilType{
         HARD, //There's no transparency
         SOFT  //The transparency of each pixel increases the farther they are from the center
-    } pencilType = PencilType::SOFT;
-
-    //'hardness' can have values in the range [0, 1]. Only has effect when 'pencilType' is set to soft
-    //It determines the amount of pixels that get affected by the alpha change
-    float hardness = 0.3f;
+    };
 
     //Determines how alpha values are calculated in soft pencils
     enum class AlphaCalculation{
         LINEAR = 0,     //The alpha value decreases linealy       (e.g: alpha = 1-distance/radius)
         QUADRATIC,  //The alpha value decreases quadratically (e.g: alpha = 1-pow(distance/radius, 2))
         EXPONENTIAL //The alpha value decreases exponentially (e.g: alpha = exp(e, -k*(distance/radius)), where k is a constant value)
-    } alphaCalculation = AlphaCalculation::LINEAR;
+    };
 
     struct DrawPoint{
         SDL_Point pos = {0, 0};
         Uint8 alpha = 0;
     };
 
-    int GetRadius();
+    //SetRadius calls UpdatePreviewRects
     void SetRadius(int nRadius);
+    int GetRadius();
+
+    void SetHardness(float nHardness);
+    float GetHardness();
+    
+    void SetAlphaCalculation(AlphaCalculation nAlphaCalculation);
+    void SetPencilType(PencilType nPencilType);
+
     std::vector<DrawPoint> ApplyOn(SDL_Point pixel, SDL_Rect *usedArea);
 
-    void DrawPreview(SDL_Point center, float resolution, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE});
+    //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
+    void SetResolution(float nResolution);
+
+    void DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE});
 
     private:
 
@@ -340,7 +347,25 @@ struct Pencil{
 	//Always set it to 1 less so that a radius set to 1 covers 1 pixel, while making it impossible to get returned a radius of 0
     int mRadius = 1;
 
+    //'mHardness' can have values in the range [0, 1]. Only has effect when 'mPencilType' is set to soft
+    //It determines the amount of pixels that get affected by the alpha change
+    float mHardness = 0.3f;
+
+    AlphaCalculation mAlphaCalculation = AlphaCalculation::LINEAR;
+    PencilType mPencilType = PencilType::SOFT;
+
+    //Holds the relative positions for the pixels that should be coloured with the current radius, and their alpha values
+    std::vector<DrawPoint> mCirclePixels;
+
+    //We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
+	std::vector<SDL_Rect> mPreviewRects;
+    float mRectsResolution = 1.0f;
+
+    void UpdateCirclePixels();
+    void UpdateCircleAlphas();
+    void SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel);
     void FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points);
+    void UpdatePreviewRects();
 };
 
 class PencilModifier{
