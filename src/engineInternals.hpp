@@ -13,6 +13,12 @@ struct OptionInfo{
         PENCIL_HARDNESS = 3,
         SOFT_ALPHA_CALCULATION = 4,
         
+        CHOOSE_TOOL = 20,
+
+        ADD_LAYER = 50,
+        REMOVE_CURRENT_LAYER = 51,
+        SELECT_LAYER = 52,
+        
         NEW_CANVAS_WIDTH = 100,
         NEW_CANVAS_HEIGHT = 101,
         NEW_CANVAS_CREATE = 102,
@@ -101,6 +107,10 @@ class Option{
     void SetHeight(int nHeight);
     void SetOptionText(const char *pNewText);
 
+    OptionInfo::OptionIDs GetOptionID();
+
+    void FetchInfo(std::string_view info);
+
     private:
 
     //It is private because, if resize is needed, we would also need to resize other components
@@ -150,6 +160,7 @@ class Option{
         static void SetOptionText(Option *pOption, std::string_view nOptionText);
         static void SetMinValue(Option *pOption, std::string_view nMin);
         static void SetMaxValue(Option *pOption, std::string_view nMax);
+        static void SetDecimalDigits(Option *pOption, std::string_view nDigits);
         static void SetDefaultText(Option *pOption, std::string_view nDefaultText);
         static void AddChoiceToArray(Option *pOption, std::string_view nTexturePath);
         static void UnusableInfo(Option *pOption, std::string_view nUnusableInfo);
@@ -247,6 +258,8 @@ class InternalWindow{
     //Returns true if the given point falls exactly inside the inner border of the window
     //If border != nullptr, it gets assigned to the value of the exact border with the preferences being TOP > LEFT > BOTTOM > RIGHT
     bool PointInsideInnerBorder(SDL_Point point, Border *border);
+    
+    friend class AppManager;
 };
 
 class MainOption{
@@ -340,6 +353,9 @@ class AppManager{
     void InitializeFromFile();
     void ProcessMainBarData();
     void ProcessWindowsData();
+
+    //If the option couldn't be found, a null pointer is returned
+    Option *FindOption(OptionInfo::OptionIDs optionID);
 };
 /*
 class AppDataRequester{

@@ -215,9 +215,11 @@ class Slider{
     void SetDimensions(SDL_Rect nDimensions);
     SDL_Rect GetDimensions();
 
-    void SetValue(float nValue);
+    //If mustUpdate is set to false, the text and filled dimensions won't get updated when the new value is the same as the current one
+    void SetValue(float nValue, bool mustUpdate = false);
     void SetMinValue(float nMin);
     void SetMaxValue(float nMax);
+    void SetDecimalPlaces(int nDecimal);
     float GetValue();
 
     //Returns true if the last SetValue gave a new value to mValue (aka nValue != mValue)
@@ -236,7 +238,7 @@ class Slider{
 
     //TODO: make it so that you can set it (either via SetDecimalPlaces/SetPrecission or in the constructor)
     //It is only used if mValue is a floating point
-    const int VALUE_DECIMAL_PLACES = 1;
+    int mDecimalPlaces = 1;
 
     //Currently this textfield cannot be used to set the value
     TextField mTextField;
@@ -334,6 +336,7 @@ struct Pencil{
     void SetAlphaCalculation(AlphaCalculation nAlphaCalculation);
     void SetPencilType(PencilType nPencilType);
 
+        std::vector<SDL_Point> GetAffectedPixels(SDL_Point pixel, SDL_Rect *usedArea);
     std::vector<DrawPoint> ApplyOn(SDL_Point pixel, SDL_Rect *usedArea);
 
     //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
@@ -392,12 +395,14 @@ class PencilModifier{
 class MutableTexture{
     public:
 
-    MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255});
+    MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255, SDL_ALPHA_OPAQUE});
     MutableTexture(SDL_Renderer *pRenderer, const char *pImage);
 
     SDL_Color GetPixelColor(SDL_Point pixel, bool *validValue = nullptr);
 
     void Clear(const SDL_Color &clearColor);
+
+    void ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor);
 
     //SetPixel methods. Both SetDrawnPixels blend the alpha of the pixel instead of just setting it
     void SetPixel(SDL_Point pixel, const SDL_Color &color);
@@ -410,6 +415,14 @@ class MutableTexture{
     //Updates the texture, applying all the changes made since the last call. Must be called outside the class
     void UpdateTexture();
 
+    void AddLayer(SDL_Renderer *pRenderer);
+    void DeleteCurrentLayer();
+    
+    //Sets the selected layer to the chosen one clamped between 0 and the amount of layers minus 1
+    void SetLayer(int nLayer);
+    int GetLayer();
+    int GetTotalLayers();
+
     void DrawIntoRenderer(SDL_Renderer *pRenderer, const SDL_Rect &dimensions);
 
     //Returns true if unable to save
@@ -420,11 +433,13 @@ class MutableTexture{
 
     private:
 
+    int mSelectedLayer = 0;
+
     //This is what actually gets drawn into the screen
-    std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
+    std::vector<std::unique_ptr<SDL_Texture, PointerDeleter>> mTextures;
 
     //This is what stores the pixel data
-    std::unique_ptr<SDL_Surface, PointerDeleter> mpSurface;
+    std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mSurfaces;
 
     //Holds the position of all the pixels that have been modified since the last call to UpdateTexture
     std::vector<SDL_Point> mChangedPixels;
@@ -436,16 +451,24 @@ class MutableTexture{
     SDL_Rect GetChangesRect();
 
     inline bool IsPixelOutsideImage(SDL_Point pixel){
-        return (std::clamp(pixel.x, 0, mpSurface->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mpSurface->h-1) != pixel.y);
+        return (std::clamp(pixel.x, 0, mSurfaces[mSelectedLayer]->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mSurfaces[mSelectedLayer]->h-1) != pixel.y);
     }
     inline Uint32* UnsafeGetPixel(SDL_Point index){
-        return (Uint32*)((Uint8*)mpSurface->pixels + index.y * mpSurface->pitch + index.x * mpSurface->format->BytesPerPixel);
+        return (Uint32*)((Uint8*)mSurfaces[mSelectedLayer]->pixels + index.y * mSurfaces[mSelectedLayer]->pitch + index.x * mSurfaces[mSelectedLayer]->format->BytesPerPixel);
+    }
+    inline Uint32* UnsafeGetPixel(SDL_Point index, int layer){
+        return (Uint32*)((Uint8*)mSurfaces[layer]->pixels + index.y * mSurfaces[layer]->pitch + index.x * mSurfaces[layer]->format->BytesPerPixel);
     }
 };
 
-
+//TODO: add an actual base class Tool, that has method to process a quantity of pixels. The Pencil class would inherit from it, as so would Eraser, ColorPicker, RangeSelection  
 class Canvas{
     public:
+
+    enum class Tool{
+        DRAW_TOOL = 0,
+        ERASE_TOOL = 1
+    } usedTool = Tool::ERASE_TOOL;
 
     Pencil pencil;
     SDL_Color pencilDisplayMainColor = {0, 0, 0, SDL_ALPHA_OPAQUE};

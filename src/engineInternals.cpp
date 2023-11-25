@@ -263,15 +263,15 @@ void Option::SetOptionText(const char *pNewText){
 		case InputMethod::HEX_TEXT_FIELD:
 		case InputMethod::WHOLE_TEXT_FIELD:
 			
-			input.mpTextField->dimensions.x += MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
-			input.mpTextField->dimensions.w -= MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
+			input.mpTextField->dimensions.x += MIN_SPACE + maxTextSpace;
+			input.mpTextField->dimensions.w -= MIN_SPACE + maxTextSpace;
 			break;
 			
 		case InputMethod::SLIDER:{
 			
 			SDL_Rect sliderDimensions = input.mpSlider->GetDimensions();
-			sliderDimensions.x += MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
-			sliderDimensions.w -= MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
+			sliderDimensions.x += MIN_SPACE + maxTextSpace;
+			sliderDimensions.w -= MIN_SPACE + maxTextSpace;
 			input.mpSlider->SetDimensions(sliderDimensions);
 			
 			break;
@@ -285,9 +285,25 @@ void Option::SetOptionText(const char *pNewText){
 			break;
 
 		case InputMethod::TICK:
-			input.mpTickButton->dimensions.x += MIN_SPACE + maxTextSpace;//mOptionText->GetWidth();
+			input.mpTickButton->dimensions.x += MIN_SPACE + maxTextSpace;
 			break;
 	}
+}
+
+OptionInfo::OptionIDs Option::GetOptionID(){
+	return mOptionID;
+}
+
+void Option::FetchInfo(std::string_view info){
+	Option::OptionCommands::LoadCommands();
+
+	for(int prevI = 0, i = info.find_first_of('_', prevI); i != std::string::npos; i = info.find_first_of('_', prevI)){
+		Option::OptionCommands::HandleCommand(this, info.substr(prevI, i-prevI));
+		
+		prevI = i+1;
+	}
+
+	Option::OptionCommands::UnloadCommands();
 }
 
 OptionInfo *Option::GetData(){
@@ -408,6 +424,7 @@ void Option::OptionCommands::LoadCommands(){
 	mCommandsMap->emplace("DefaultText", OptionCommands::SetDefaultText);
 	mCommandsMap->emplace("SliderMin", OptionCommands::SetMinValue);
 	mCommandsMap->emplace("SliderMax", OptionCommands::SetMaxValue);
+	mCommandsMap->emplace("SliderDigits", OptionCommands::SetDecimalDigits);
 	mCommandsMap->emplace("AddChoice", OptionCommands::AddChoiceToArray);
 	mCommandsMap->emplace("OptionText", OptionCommands::SetOptionText);
 	mCommandsMap->emplace("InitialValue", OptionCommands::SetInitialValue);
@@ -486,6 +503,21 @@ void Option::OptionCommands::SetMaxValue(Option *pOption, std::string_view nMax)
 		pOption->input.mpSlider->SetMaxValue(maxValue);
 	} catch(std::invalid_argument const &e){
 		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" could not transform" + std::string(nMax.data(), nMax.data()+nMax.size()) + "into a float");
+	}
+}
+
+void Option::OptionCommands::SetDecimalDigits(Option *pOption, std::string_view nDigits){
+	if(pOption->mInputMethod != Option::InputMethod::SLIDER){
+		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		return;
+	}
+
+	try{
+		int decimalDigits;
+		std::from_chars(nDigits.data(), nDigits.data()+nDigits.size(), decimalDigits);
+		pOption->input.mpSlider->SetDecimalPlaces(decimalDigits);
+	} catch(std::invalid_argument const &e){
+		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" could not transform" + std::string(nDigits.data(), nDigits.data()+nDigits.size()) + "into a float");
 	}
 }
 
@@ -969,7 +1001,7 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 
 	mpCanvas.reset(new Canvas(mpRenderer.get(), 1, 1));
 	mpCanvas->viewport = {0, mMainBarHeight, mWidth, mHeight-mMainBarHeight};
-	mpCanvas->SetSavePath("save.png");
+	mpCanvas->SetSavePath("NewImage.png");
 	NewCanvas(100, 100);
 	InitializeFromFile();
 
@@ -977,6 +1009,7 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 	mpMainBar.reset(new MainBar({0, 0, mWidth, mMainBarHeight}));
 	
 	InitializeWindow("PencilWindow");
+	InitializeWindow("LayerWindow");
 }
 
 void AppManager::AddImage(const std::string &imagePath){
@@ -1145,7 +1178,7 @@ void AppManager::InitializeWindow(const std::string &windowName){
 			std::getline(windowFile, line, '\n');
 			
 			//We check wether the line is empty so no empty lines are used as options (makes sense)
-			if(!line.empty()){
+			if(!line.empty() && line[0] != '#'){
 				file += line+"\n"; //We add the '\n' as std::getline doesn't add it
 				options++; //Each line is a new option
 			}
@@ -1234,7 +1267,8 @@ void AppManager::ProcessMainBarData(){
 			mpCanvas->Save();
 			break;
 		case MainBar::MainOptionIDs::CLEAR:
-			mpCanvas->Clear(SDL_Color{255, 255, 255});
+			//Currently the current layer is cleared with no color
+			mpCanvas->Clear(SDL_Color{255, 255, 255, SDL_ALPHA_TRANSPARENT});
 			break;
 		case MainBar::MainOptionIDs::NEW_CANVAS:
 			InitializeWindow("NewCanvasWindow");
@@ -1268,6 +1302,34 @@ void AppManager::ProcessWindowsData(){
 					break;
 				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:
 					mpCanvas->pencil.SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(option->data.wholeValue));
+					break;
+				case OptionInfo::OptionIDs::CHOOSE_TOOL:
+					mpCanvas->usedTool = static_cast<Canvas::Tool>(option->data.wholeValue);
+					DebugPrint("Current tool "+option->data.wholeValue);
+					break;
+				case OptionInfo::OptionIDs::ADD_LAYER:
+					if(option->data.tick == true){
+						mpCanvas->GetImage()->AddLayer(mpRenderer.get());
+						
+						//We update select layer slider max
+						Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
+						if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
+					}
+					else DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+					break;
+				case OptionInfo::OptionIDs::REMOVE_CURRENT_LAYER:
+					if(option->data.tick == true) {
+						mpCanvas->GetImage()->DeleteCurrentLayer();
+
+						//We update select layer slider max					
+						Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
+						if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
+					}
+					else DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+					break;
+				case OptionInfo::OptionIDs::SELECT_LAYER:
+					//we use the real value of the slider as an index
+					mpCanvas->GetImage()->SetLayer((int)(option->data.realValue));
 					break;
 				case OptionInfo::OptionIDs::NEW_CANVAS_WIDTH:
 					mInternalWindows[i]->AddTemporalData(option.get());
@@ -1314,4 +1376,17 @@ void AppManager::ProcessWindowsData(){
 			}
 		}
 	}
+}
+
+Option *AppManager::FindOption(OptionInfo::OptionIDs optionID){
+	for(const auto &window : mInternalWindows){
+		for(const auto &option : window->mOptions){
+			if(option->GetOptionID() == optionID){
+				return option.get();
+			}
+		}
+	}
+
+	DebugPrint("Could not find an Option with the specified optionID: " + std::to_string(static_cast<int>(optionID)));
+	return nullptr;
 }
