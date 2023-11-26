@@ -3,8 +3,9 @@
 #include <array>
 #include <span>
 #include <functional>
+#include <variant>
 
-//TODO: transform Data into a template
+//TODO: transform Data into a std::variant
 struct OptionInfo{
     enum class OptionIDs : int{
         DRAWING_COLOR = 0,
@@ -28,59 +29,47 @@ struct OptionInfo{
         PENCIL_DISPLAY_ALTERNATE_COLOR = 202
     };
     enum class DataUsed{
-        TEXT,
-        COLOR,
-        REAL_VALUE,
-        WHOLE_VALUE,
-        TICK,
-        NONE
+        NONE = 0,
+        TEXT = 1,
+        COLOR = 2,
+        REAL_VALUE = 3,
+        WHOLE_VALUE = 4,
+        TICK = 5
     };
+    using data_t = std::variant<std::monostate, std::string, SDL_Color, float, int, bool>;
 
     OptionIDs optionID; //Determines how the data should be handled
 
-    DataUsed dataUsed; //Determines which member from the Data union was assigned
-
-    //Might be rewritten into just a std::string that is interpreted depending on "dataUsed"
-    union Data{ //The data needed to be transmited
-        std::string text; //The text of a textfield, like a layer's name
-        SDL_Color color; //The color of a textfield or from the image itself
-        float realValue; //The decimal value of a slider
-        int wholeValue; //The whole value of a choices array or a text
-        bool tick; //The value of a tickbutton
-
-        Data(std::string nText) : text(nText){};
-        Data(SDL_Color nColor) : color(nColor){};
-        Data(float nRealValue) : realValue(nRealValue){};
-        Data(int nWholeValue) : wholeValue(nWholeValue){};
-        Data(bool nTick) : tick(nTick){};
-        ~Data(){}
-    } data;
-
-    OptionInfo() : optionID((OptionIDs)(-1)), dataUsed(DataUsed::NONE), data(false){}
+    data_t data;
     
-    template <typename T> requires std::is_constructible_v<Data, T>
-    OptionInfo(OptionIDs nOptionID, DataUsed nDataUsed, T nData) : optionID(nOptionID), dataUsed(nDataUsed), data(nData){}
+    struct GetDataVisitor {
+        template <typename T>
+        T operator()(const T& value) const {
+            return value;
+        }
+    };
+
+    OptionInfo() : optionID((OptionIDs)(-1)), data(std::monostate{}){}
     
-    ~OptionInfo(){
-        if(dataUsed == DataUsed::TEXT){
-            data.text.~basic_string();
+    template <typename T> requires std::is_constructible_v<data_t, T>
+    OptionInfo(OptionIDs nOptionID, T nData) : optionID(nOptionID),  data(nData){}
+
+    template <typename T> requires std::is_constructible_v<data_t, T>
+    std::optional<T> GetData() const{
+        if(std::holds_alternative<T>(data)){
+            return std::get<T>(data);
+        } else {
+            return std::nullopt;
         }
     }
 
-    bool IsInvalid(){return dataUsed == DataUsed::NONE;}
-    static OptionInfo Invalid(){return {(OptionIDs)(-1), DataUsed::NONE, false};}
+    bool IsInvalid(){return data.index() == static_cast<size_t>(DataUsed::NONE);}
+
+    static OptionInfo Invalid(){return OptionInfo();}
 
     void SetTo(const OptionInfo& other){
         optionID = other.optionID;
-        dataUsed = other.dataUsed;
-
-        switch(dataUsed){
-            case DataUsed::TEXT: data.text = other.data.text; break;
-            case DataUsed::COLOR: data.color = other.data.color; break;
-            case DataUsed::REAL_VALUE: data.realValue = other.data.realValue; break;
-            case DataUsed::WHOLE_VALUE: data.wholeValue = other.data.wholeValue; break;
-            case DataUsed::TICK: data.tick = other.data.tick; break;
-        }
+        data = other.data;
     }
 };
 

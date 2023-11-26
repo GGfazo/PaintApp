@@ -839,6 +839,7 @@ void Pencil::SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel){
 		pixel.alpha = SDL_ALPHA_OPAQUE;
 	
 	} else if(mPencilType ==  PencilType::SOFT){
+		//TODO: modify hardness system (mHardness = 1 doesn't make all the pixels fully opaque (and (mRadius+1)*mHardness is a bit of an overkill))
 		float centerDistance = sqrt(pow(pixel.pos.x-center.x, 2) + pow(pixel.pos.y-center.y, 2));
 		float maxDistance = mRadius*mHardness;
 		Uint8 alpha;
@@ -1464,7 +1465,7 @@ void Canvas::HandleEvent(SDL_Event *event){
 		//It should also check the wheel is used inside the canvas viewport (no need to be in the canvas exactly), as otherwise it should operate on the hovered text if any
 
 		//No need to clamp the value, as SetHardness already does that
-		pencil.SetHardness(pencil.GetHardness() + event->wheel.y*0.1f);
+		//pencil.SetHardness(pencil.GetHardness() + event->wheel.y*0.1f);
 	}
 }
 

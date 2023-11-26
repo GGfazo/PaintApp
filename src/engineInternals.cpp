@@ -312,22 +312,22 @@ OptionInfo *Option::GetData(){
 
 	switch(mInputMethod){
 		case InputMethod::TEXT_FIELD:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::TEXT, std::string(input.mpTextField->GetText()));
+			return new OptionInfo(mOptionID, std::string(input.mpTextField->GetText()));
 
 		case InputMethod::HEX_TEXT_FIELD:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::COLOR, input.mpTextField->GetAsColor(nullptr));
+			return new OptionInfo(mOptionID, input.mpTextField->GetAsColor(nullptr));
 
 		case InputMethod::WHOLE_TEXT_FIELD:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::WHOLE_VALUE, input.mpTextField->GetAsNumber(nullptr));
+			return new OptionInfo(mOptionID, input.mpTextField->GetAsNumber(nullptr));
 
 		case InputMethod::SLIDER:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::REAL_VALUE, input.mpSlider->GetValue());
+			return new OptionInfo(mOptionID, input.mpSlider->GetValue());
 
 		case InputMethod::CHOICES_ARRAY:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::WHOLE_VALUE, input.mpChoicesArray->GetLastChosenOption());
+			return new OptionInfo(mOptionID, input.mpChoicesArray->GetLastChosenOption());
 
 		case InputMethod::TICK:
-			return new OptionInfo(mOptionID, OptionInfo::DataUsed::TICK, input.mpTickButton->GetValue());
+			return new OptionInfo(mOptionID, input.mpTickButton->GetValue());
 
 		default:
 			return new OptionInfo();
@@ -967,7 +967,7 @@ std::shared_ptr<OptionInfo> MainBar::GetData(){
 		case static_cast<int>(MainOptionIDs::CLEAR):
 		case static_cast<int>(MainOptionIDs::NEW_CANVAS):
 		case static_cast<int>(MainOptionIDs::PREFERENCES):
-			return std::shared_ptr<OptionInfo>(new OptionInfo(static_cast<OptionInfo::OptionIDs>(mCurrentClickedIndex),  OptionInfo::DataUsed::TICK, true));
+			return std::shared_ptr<OptionInfo>(new OptionInfo(static_cast<OptionInfo::OptionIDs>(mCurrentClickedIndex), true));
 		default:
 			ErrorPrint("Current clicked index could not be converted into a main option: "+std::to_string(mCurrentClickedIndex));
 			return std::shared_ptr<OptionInfo>(new OptionInfo());
@@ -1283,93 +1283,168 @@ void AppManager::ProcessMainBarData(){
 }
 
 void AppManager::ProcessWindowsData(){
+	auto safeDataApply = []<typename T>(const OptionInfo* option, const std::function<void(T)> &function){
+		auto data = option->GetData<T>();
+		if(data.has_value()){
+			function(data.value());
+		} else {
+			ErrorPrint("option did not have a valid value");
+		}
+	};
+
 	for(int i = 0; i < mInternalWindows.size(); i++){
-		auto data = mInternalWindows[i]->GetData();
+		auto windowData = mInternalWindows[i]->GetData();
 
-		for(auto &option : data){
+		//TODO: look into ways to avoid code repetition
+		for(auto &option : windowData){
 			switch(option->optionID){
-				case OptionInfo::OptionIDs::DRAWING_COLOR:
-					mpCanvas->SetColor(option->data.color);
-					break;
-				case OptionInfo::OptionIDs::HARD_OR_SOFT:
-					mpCanvas->pencil.SetPencilType(option->data.tick ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
-					break;
-				case OptionInfo::OptionIDs::PENCIL_RADIUS:
-					mpCanvas->pencil.SetRadius((int)(option->data.realValue));
-					break;
-				case OptionInfo::OptionIDs::PENCIL_HARDNESS:
-					mpCanvas->pencil.SetHardness(0.01f*(option->data.realValue));
-					break;
-				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:
-					mpCanvas->pencil.SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(option->data.wholeValue));
-					break;
-				case OptionInfo::OptionIDs::CHOOSE_TOOL:
-					mpCanvas->usedTool = static_cast<Canvas::Tool>(option->data.wholeValue);
-					DebugPrint("Current tool "+option->data.wholeValue);
-					break;
-				case OptionInfo::OptionIDs::ADD_LAYER:
-					if(option->data.tick == true){
-						mpCanvas->GetImage()->AddLayer(mpRenderer.get());
-						
-						//We update select layer slider max
-						Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
-						if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
-					}
-					else DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
-					break;
-				case OptionInfo::OptionIDs::REMOVE_CURRENT_LAYER:
-					if(option->data.tick == true) {
-						mpCanvas->GetImage()->DeleteCurrentLayer();
-
-						//We update select layer slider max					
-						Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
-						if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
-					}
-					else DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
-					break;
-				case OptionInfo::OptionIDs::SELECT_LAYER:
-					//we use the real value of the slider as an index
-					mpCanvas->GetImage()->SetLayer((int)(option->data.realValue));
-					break;
-				case OptionInfo::OptionIDs::NEW_CANVAS_WIDTH:
-					mInternalWindows[i]->AddTemporalData(option.get());
-					break;
-				case OptionInfo::OptionIDs::NEW_CANVAS_HEIGHT:
-					mInternalWindows[i]->AddTemporalData(option.get());
-					break;
-				case OptionInfo::OptionIDs::NEW_CANVAS_CREATE:{
-					if(option->data.tick == false){
-						DebugPrint("Data was false (should only occur in internal window's creation)");
-						break;
-					}
-					auto &temporalData = mInternalWindows[i]->GetTemporalData();
-					
-					auto widthOption = std::find_if(temporalData.begin(), temporalData.end(), [](decltype(*temporalData.begin()) option){return option->optionID == OptionInfo::OptionIDs::NEW_CANVAS_WIDTH;});
-					auto heightOption = std::find_if(temporalData.begin(), temporalData.end(), [](decltype(*temporalData.begin()) option){return option->optionID == OptionInfo::OptionIDs::NEW_CANVAS_HEIGHT;});
-					
-					//TODO: If no width/height was specified we use a default value (100), may be changed into an error in the future
-					int width = (widthOption == temporalData.end()) ? 100 : (*widthOption)->data.wholeValue;
-					int height = (heightOption == temporalData.end()) ? 100 : (*heightOption)->data.wholeValue;
-
-					NewCanvas(width, height);
-					temporalData.clear();
-
-					//Finally we delete this window as it's only purporse is to create a new canvas
-					mInternalWindows.erase(mInternalWindows.begin()+i);
-					i--;
-
+				case OptionInfo::OptionIDs::DRAWING_COLOR:{
+					std::function<void(SDL_Color)>  fn = std::bind(&Canvas::SetColor, mpCanvas.get(), std::placeholders::_1);
+					safeDataApply(option.get(), fn);
 					break;
 				}
-				case OptionInfo::OptionIDs::SAVING_NAME:
-					if(option->data.text.empty()) mpCanvas->SetSavePath("NewImage.png");
-					else mpCanvas->SetSavePath((option->data.text + ".png").c_str());
+				case OptionInfo::OptionIDs::HARD_OR_SOFT:{
+					auto mLambda = [this](bool toHard){
+						mpCanvas->pencil.SetPencilType(toHard ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
+					};
+					std::function<void(bool)> fn = mLambda;
+					safeDataApply(option.get(), fn);
 					break;
-				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:
-					mpCanvas->pencilDisplayMainColor = option->data.color;
+				}
+				case OptionInfo::OptionIDs::PENCIL_RADIUS:{
+					auto mLambda = [this](float radius){
+						mpCanvas->pencil.SetRadius((int)radius);
+					};
+					std::function<void(float)> fn = mLambda;
+					safeDataApply(option.get(), fn);
 					break;
-				case OptionInfo::OptionIDs::PENCIL_DISPLAY_ALTERNATE_COLOR:
-					mpCanvas->pencilDisplayAlternateColor = option->data.color;
+				}
+				case OptionInfo::OptionIDs::PENCIL_HARDNESS:{
+					std::function<void(float)> fn = std::bind(&Pencil::SetHardness, &(mpCanvas->pencil), std::placeholders::_1);
+					safeDataApply(option.get(), fn);
 					break;
+				}
+				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:{
+					auto mLambda = [this](int alphaMode){
+						mpCanvas->pencil.SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(alphaMode));
+					};
+					std::function<void(int)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::CHOOSE_TOOL:{
+					auto mLambda = [this](int chosenTool){
+						mpCanvas->usedTool = static_cast<Canvas::Tool>(chosenTool);
+					};
+					std::function<void(int)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::ADD_LAYER:{
+					auto mLambda = [this](bool addLayer){
+						if(addLayer){
+							mpCanvas->GetImage()->AddLayer(mpRenderer.get());
+							
+							//We update select layer slider max
+							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
+							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
+						} else {
+							DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+						}
+					};
+					std::function<void(bool)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::REMOVE_CURRENT_LAYER:{
+					auto mLambda = [this](bool deleteLayer){
+						if(deleteLayer){
+							mpCanvas->GetImage()->DeleteCurrentLayer();
+							
+							//We update select layer slider max
+							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
+							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
+						} else {
+							DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+						}
+					};
+					std::function<void(bool)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::SELECT_LAYER:{
+					auto mLambda = [this](float layer){
+						mpCanvas->GetImage()->SetLayer((int)layer);
+					};
+					std::function<void(float)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::NEW_CANVAS_WIDTH:{
+					//No need to use the specific data
+					mInternalWindows[i]->AddTemporalData(option.get());
+					break;
+				}
+				case OptionInfo::OptionIDs::NEW_CANVAS_HEIGHT:{
+					//No need to use the specific data
+					mInternalWindows[i]->AddTemporalData(option.get());
+					break;
+				}
+				case OptionInfo::OptionIDs::NEW_CANVAS_CREATE:{
+					auto mLambda = [this, &i](bool newCanvas){
+						if(!newCanvas){
+							DebugPrint("Data was false (should only occur in internal window's creation)");
+						} else {
+							auto &temporalData = mInternalWindows[i]->GetTemporalData();
+							
+							//We search for the width and height of the new canvas that the user may have set
+							auto widthOption = std::find_if(temporalData.begin(), temporalData.end(), [](decltype(*temporalData.begin()) option){return option->optionID == OptionInfo::OptionIDs::NEW_CANVAS_WIDTH;});
+							auto heightOption = std::find_if(temporalData.begin(), temporalData.end(), [](decltype(*temporalData.begin()) option){return option->optionID == OptionInfo::OptionIDs::NEW_CANVAS_HEIGHT;});
+							
+							//TODO: If no width/height was specified we currently use a default value (100), may be changed into an error in the future
+							int width = (widthOption == temporalData.end() || !(*widthOption)->GetData<int>().has_value()) ? 100 : (*widthOption)->GetData<int>().value();
+							int height = (heightOption == temporalData.end() || !(*heightOption)->GetData<int>().has_value()) ? 100 : (*heightOption)->GetData<int>().value();
+
+							NewCanvas(width, height);
+							temporalData.clear();
+
+							//Finally we delete this window as it's only purporse is to create a new canvas
+							mInternalWindows.erase(mInternalWindows.begin()+i);
+							i--;
+						}
+					};
+					std::function<void(bool)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::SAVING_NAME:{
+					auto mLambda = [this](std::string text){
+						if(text.empty()){
+							mpCanvas->SetSavePath("NewImage.png");
+						} else {
+							mpCanvas->SetSavePath((text + ".png").c_str());
+						}
+					};
+					std::function<void(std::string)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:{
+					auto mLambda = [this](SDL_Color pencilDisplay){
+						mpCanvas->pencilDisplayMainColor = pencilDisplay;
+					};
+					std::function<void(SDL_Color)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::PENCIL_DISPLAY_ALTERNATE_COLOR:{
+					auto mLambda = [this](SDL_Color pencilDisplay){
+						mpCanvas->pencilDisplayAlternateColor = pencilDisplay;
+					};
+					std::function<void(SDL_Color)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
 				default:
 					ErrorPrint("Unable to tell the option id: "+std::to_string(static_cast<int>(option->optionID)));
 					break;
