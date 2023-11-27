@@ -26,7 +26,9 @@ struct OptionInfo{
 
         SAVING_NAME = 200,
         PENCIL_DISPLAY_MAIN_COLOR = 201,
-        PENCIL_DISPLAY_ALTERNATE_COLOR = 202
+        PENCIL_DISPLAY_ALTERNATE_COLOR = 202,
+        CANVAS_MOVEMENT_SPEED = 203,
+        CANVAS_MOVEMENT_FAST_SPEED = 204
     };
     enum class DataUsed{
         NONE = 0,

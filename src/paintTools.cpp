@@ -1241,10 +1241,12 @@ Canvas::Canvas(SDL_Renderer *pRenderer, int nWidth, int nHeight) :
 	mpImage(new MutableTexture(pRenderer, nWidth, nHeight)){
 
 	mDimensions = {0, 0, nWidth, nHeight};
+	UpdateRealPosition();
 }
 
 Canvas::Canvas(SDL_Renderer *pRenderer, const char *pLoadFile) : mpImage(new MutableTexture(pRenderer, pLoadFile)){
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	UpdateRealPosition();
 }
 
 Canvas::~Canvas(){
@@ -1254,10 +1256,13 @@ Canvas::~Canvas(){
 void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 	mpImage.reset(new MutableTexture(pRenderer, nWidth, nHeight));
 	mDimensions = {0, 0, nWidth, nHeight};
+	UpdateRealPosition();
 }
+
 void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
 	mpImage.reset(new MutableTexture(pRenderer, pLoadFile));
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	UpdateRealPosition();
 }
 
 SDL_Color Canvas::GetColor(){
@@ -1333,6 +1338,7 @@ void Canvas::SetSavePath(const char *nSavePath){
 void Canvas::SetOffset(int offsetX, int offsetY){
 	mDimensions.x = offsetX;
 	mDimensions.y = offsetY;
+	UpdateRealPosition();
 }
 
 void Canvas::SetResolution(float nResolution){
@@ -1342,8 +1348,10 @@ void Canvas::SetResolution(float nResolution){
 
 	int nWidth = mpImage->GetWidth()*mResolution, nHeight = mpImage->GetHeight()*mResolution;
 
-	mDimensions.x += (mDimensions.w-nWidth)/2;
-	mDimensions.y += (mDimensions.h-nHeight)/2;
+	mRealPosition.x = viewport.w/2 - (viewport.w/2-(mRealPosition.x+viewport.x)) * nWidth * 1.0f / mDimensions.w;
+	mRealPosition.y = viewport.h/2 - (viewport.h/2-(mRealPosition.y+viewport.y)) * nHeight * 1.0f / mDimensions.h;
+	mDimensions.x = (int)(mRealPosition.x);
+	mDimensions.y = (int)(mRealPosition.y);
 	mDimensions.w = nWidth;
 	mDimensions.h = nHeight;
 }
@@ -1442,22 +1450,24 @@ void Canvas::HandleEvent(SDL_Event *event){
 		if(SDL_IsTextInputActive()) return;
 
 		switch(event->key.keysym.sym){
-			case SDLK_a: mDimensions.x++; break;
-			case SDLK_d: mDimensions.x--; break;
-			case SDLK_w: mDimensions.y++; break;
-			case SDLK_s: mDimensions.y--; break;
+			//The 'wasd' controls may seem inverted, but you should imagine it as if you were controlling a camera, therefore the canvas moves in the opposite position
+			case SDLK_a: mCanvasMovement |= Movement::RIGHT; break;
+			case SDLK_d: mCanvasMovement |= Movement::LEFT; break;
+			case SDLK_w: mCanvasMovement |= Movement::DOWN; break;
+			case SDLK_s: mCanvasMovement |= Movement::UP; break;
 			case SDLK_e: SetResolution(mResolution+10.0f*M_MIN_RESOLUTION); break;
 			case SDLK_q: SetResolution(mResolution-10.0f*M_MIN_RESOLUTION); break;
-			case SDLK_p: Save(); break;
-			//TODO: this is a temporal solution, a displayable solution should be added
-			case SDLK_UP: 
-				mpImage->SetLayer(mpImage->GetLayer()+1);
-				DebugPrint("Current layer is "+std::to_string(mpImage->GetLayer()));
-				break;
-			case SDLK_DOWN: 
-				mpImage->SetLayer(mpImage->GetLayer()-1);
-				DebugPrint("Current layer is "+std::to_string(mpImage->GetLayer()));
-				break;
+		}
+	}
+	else if (event->type == SDL_KEYUP){
+		//We don't want to handle a key down if the text input is active, because that means a textfield is using the input
+		if(SDL_IsTextInputActive()) return;
+
+		switch(event->key.keysym.sym){
+			case SDLK_a: mCanvasMovement &= ~Movement::RIGHT; break;
+			case SDLK_d: mCanvasMovement &= ~Movement::LEFT; break;
+			case SDLK_w: mCanvasMovement &= ~Movement::DOWN; break;
+			case SDLK_s: mCanvasMovement &= ~Movement::UP; break;
 		}
 	}
 	else if (event->type == SDL_MOUSEWHEEL){
@@ -1471,6 +1481,18 @@ void Canvas::HandleEvent(SDL_Event *event){
 
 void Canvas::Update(float deltaTime){
 	mpImage->UpdateTexture();
+
+	if(mCanvasMovement != Movement::NONE){
+		float speed = ((SDL_GetModState() & KMOD_SHIFT) ? fastMovementSpeed : defaultMovementSpeed);
+
+		if(mCanvasMovement & Movement::LEFT)	mRealPosition.x -= deltaTime * speed;
+		if(mCanvasMovement & Movement::RIGHT)	mRealPosition.x += deltaTime * speed;
+		if(mCanvasMovement & Movement::UP)		mRealPosition.y -= deltaTime * speed;
+		if(mCanvasMovement & Movement::DOWN)	mRealPosition.y += deltaTime * speed;
+
+		mDimensions.x = (int)mRealPosition.x;
+		mDimensions.y = (int)mRealPosition.y;
+	}
 }
 
 void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
@@ -1552,6 +1574,7 @@ void Canvas::Save(){
 void Canvas::CenterInViewport(){
 	mDimensions.x = (viewport.w-mDimensions.w)/2;
 	mDimensions.y = (viewport.h-mDimensions.h)/2;
+	UpdateRealPosition();
 }
 
 int Canvas::GetResolution(){

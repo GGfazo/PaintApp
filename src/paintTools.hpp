@@ -474,6 +474,9 @@ class Canvas{
     SDL_Color pencilDisplayMainColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
     SDL_Color pencilDisplayAlternateColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
 
+    float defaultMovementSpeed = 50.0f;
+    float fastMovementSpeed = 150.0f;
+
     bool saveOnDestroy = true;
     SDL_Rect viewport;
     //The color that the rest of the canvas (not the image) has, therefore it has no impact on the end result
@@ -528,6 +531,18 @@ class Canvas{
     SDL_Color mDrawColor = {255, 0, 0, SDL_ALPHA_OPAQUE};
     bool mHolded = false;
     SDL_Point mLastMousePixel;
+
+    enum Movement : unsigned int{
+        NONE =  0b0000,
+        LEFT =  0b0001,
+        RIGHT = 0b0010,
+        UP =    0b0100,
+        DOWN =  0b1000
+    };
+    unsigned int mCanvasMovement = Movement::NONE;
+    SDL_FPoint mRealPosition;
     
     std::string mSavePath;
+
+    void UpdateRealPosition(){mRealPosition = {(float)mDimensions.x, (float)mDimensions.y};}
 };

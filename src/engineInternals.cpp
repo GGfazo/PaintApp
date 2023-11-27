@@ -1445,6 +1445,22 @@ void AppManager::ProcessWindowsData(){
 					safeDataApply(option.get(), fn);
 					break;
 				}
+				case OptionInfo::OptionIDs::CANVAS_MOVEMENT_SPEED:{
+					auto mLambda = [this](int speed){
+						mpCanvas->defaultMovementSpeed = speed;
+					};
+					std::function<void(int)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::CANVAS_MOVEMENT_FAST_SPEED:{
+					auto mLambda = [this](int speed){
+						mpCanvas->fastMovementSpeed = speed;
+					};
+					std::function<void(int)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
 				default:
 					ErrorPrint("Unable to tell the option id: "+std::to_string(static_cast<int>(option->optionID)));
 					break;
