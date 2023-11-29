@@ -85,7 +85,8 @@ class Option{
         WHOLE_TEXT_FIELD, //A text field is used as input for numbers
         SLIDER, //A slider that can hold a value in a given range
         CHOICES_ARRAY, //An array of buttons to choose a preference (eg: tools)
-        TICK //A button that either has the value true or false is used as input
+        TICK, //A button that either has the value true or false is used as input
+        ACTION //A button that performs an action when clicked
     };
 
     Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo = "");
@@ -128,6 +129,7 @@ class Option{
         Slider *mpSlider;
         ChoicesArray *mpChoicesArray;
         TickButton *mpTickButton;
+        ActionButton *mpActionButton;
     } input;
 
     //TODO probably change, I don't think we just want to use hard coded values
@@ -180,7 +182,7 @@ class InternalWindow{
         std::string_view optionsInfo;
     };
 
-    InternalWindow(SDL_Point optionsSize, InitializationData nData);
+    InternalWindow(SDL_Point optionsSize, InitializationData nData, SDL_Renderer *pRenderer);
 
     //Sets the InternalWindow's position to the chosen x and y, only if this does not crop the InternalWindow
     void SetPosition(int x, int y);
@@ -193,6 +195,9 @@ class InternalWindow{
 
     const std::string_view GetName();
 
+    //Either minimizes or un-minimizes the window, depending on its previous state. The window, when minimized, just displays a small logo in a square.
+    void Minimize();
+
     bool HandleEvent(SDL_Event *event);
     void Update(float deltaTime);
     void Draw(SDL_Renderer *pRenderer);
@@ -203,7 +208,9 @@ class InternalWindow{
     //Returns true if the event x or y values are outside the dimensions rect. In that case, they don't get changed
     static bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, bool resetIfUnable = true);
     
-    //Works exactly as the previous method, but it sets pEventX and pEventY to the location of eventX and eventY (so that the process can be undone)
+    //Converts the event x and y values to a value relative to the dimensions passed, saving the original position to a point parameter
+    //Returns true if the event x or y values are outside the dimensions rect. In that case, they don't get changed
+    //It sets pEventX and pEventY to the location of eventX and eventY (so that the process can be undone)
     static bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, int *&pEventX, int *&pEventY, bool resetIfUnable = true);
 
     private:
@@ -215,6 +222,11 @@ class InternalWindow{
 
     //Identifies this window
     const std::string M_WINDOW_NAME;
+
+    bool mMinimized = false;
+    SDL_Point mPreMiniSize = {0, 0};
+    std::unique_ptr<SDL_Texture, PointerDeleter> mpIcon;
+    static constexpr SDL_Point M_MIN_SIZE = {14*3, 14*3};
 
     std::vector<std::unique_ptr<Option>> mOptions;
 

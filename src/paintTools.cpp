@@ -244,8 +244,8 @@ void TextField::Draw(SDL_Renderer *pRenderer){
 	SDL_Rect realDimensions = {(int)dimensions.x + previousViewport.x, (int)dimensions.y + previousViewport.y, (int)dimensions.w, (int)dimensions.h};
 
 	//First we check if the text is supposed to render (aka is inside the viewport)
-	if(SDL_HasIntersection(&previousViewport, &realDimensions) == SDL_TRUE){
-		SDL_RenderSetViewport(pRenderer, &realDimensions);
+	if(SDL_Rect resultingDimensions; SDL_IntersectRect(&previousViewport, &realDimensions, &resultingDimensions) == SDL_TRUE){
+		SDL_RenderSetViewport(pRenderer, &resultingDimensions);
 		SDL_RenderCopy(pRenderer, mpTextTexture.get(), nullptr, &textRect);
 
 		//Easy way of removing the cursor on sliders, may be changed into the future (maybe by changing what sliders use to display value in text, maybe by letting them be interactable, maybe doesnby having its own bool)
@@ -395,6 +395,31 @@ void TextField::Cursor::Draw(SDL_Renderer* pRenderer, SDL_Color cursorColor, int
 	//We don't use the alpha value because it aready has no effect on the text
 	SDL_SetRenderDrawColor(pRenderer, cursorColor.r, cursorColor.g, cursorColor.b, SDL_ALPHA_OPAQUE);
 	SDL_RenderFillRect(pRenderer, &cursorDimensions);
+}
+
+//ACTION BUTTON METHODS:
+
+ActionButton::ActionButton(SDL_Rect nDimensions) : dimensions(nDimensions){}
+
+bool ActionButton::HandleEvent(SDL_Event *event){
+	if(event->type == SDL_MOUSEBUTTONDOWN){
+		SDL_Point mousePos = {event->button.x, event->button.y};
+
+		if(SDL_PointInRect(&mousePos, &dimensions)){
+			mDrawColor = HOLDED_COLOR;
+			return true;
+		}
+	} else if (event->type == SDL_MOUSEBUTTONUP){
+		mDrawColor = IDLE_COLOR;
+	}
+	return false;
+}
+
+void ActionButton::Draw(SDL_Renderer *pRenderer){
+	SDL_SetRenderDrawColor(pRenderer, mDrawColor.r, mDrawColor.g, mDrawColor.b, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRect(pRenderer, &dimensions);
+	SDL_SetRenderDrawColor(pRenderer, 120, 120, 120, SDL_ALPHA_OPAQUE);
+	SDL_RenderDrawRect(pRenderer, &dimensions);
 }
 
 //TICK BUTTON METHODS:

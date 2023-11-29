@@ -1,4 +1,4 @@
 200_0_200_200_130_
-50_T_OptionText/Add Layer_InitialValue/F_
-51_T_OptionText/Remove Layer_InitialValue/F_
+50_A_OptionText/Add Layer_
+51_A_OptionText/Remove Layer_
 52_S_SliderDigits/0_SliderMin/0_SliderMax/0_OptionText/Select Layer_InitialValue/0_

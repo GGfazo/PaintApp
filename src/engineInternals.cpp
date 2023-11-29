@@ -63,6 +63,10 @@ Option::~Option(){
 		case InputMethod::TICK:
 			delete input.mpTickButton;
 			break;
+
+		case InputMethod::ACTION:
+			delete input.mpActionButton;
+			break;
 	}
 }
 
@@ -119,6 +123,11 @@ bool Option::HandleEvent(SDL_Event *event){
 
 		case InputMethod::TICK:
 			eventHandled = input.mpTickButton->HandleEvent(event);
+			if(eventHandled) mModified = true;
+			break;
+
+		case InputMethod::ACTION:
+			eventHandled = input.mpActionButton->HandleEvent(event);
 			if(eventHandled) mModified = true;
 			break;
 	}
@@ -183,6 +192,10 @@ void Option::Draw(SDL_Renderer *pRenderer){
 		case InputMethod::TICK:
 			input.mpTickButton->Draw(pRenderer);
 			break;
+
+		case InputMethod::ACTION:
+			input.mpActionButton->Draw(pRenderer);
+			break;
 	}
 
 	SDL_RenderSetViewport(pRenderer, &previousViewport);
@@ -210,8 +223,8 @@ void Option::SetWidth(int nWidth){
 			break;
 		}
 
-		case InputMethod::TICK:
-			//We don't do anything as (currently) the height of the option determines the dimensions of the tick button
+		case InputMethod::TICK: //We don't do anything as (currently) the height of the option determines the dimensions of the tick button
+		case InputMethod::ACTION: //We don't do anything as (currently) the height of the option determines the dimensions of the action button
 			break;
 	}
 }
@@ -245,6 +258,11 @@ void Option::SetHeight(int nHeight){
 		case InputMethod::TICK:
 			input.mpTickButton->dimensions.w = mDimensions.h-MIN_SPACE*2;
 			input.mpTickButton->dimensions.h = mDimensions.h-MIN_SPACE*2;
+			break;
+
+		case InputMethod::ACTION:
+			input.mpActionButton->dimensions.w = (mDimensions.h-MIN_SPACE)*2;
+			input.mpActionButton->dimensions.h = mDimensions.h-MIN_SPACE*2;
 			break;
 	}
 }
@@ -286,6 +304,10 @@ void Option::SetOptionText(const char *pNewText){
 
 		case InputMethod::TICK:
 			input.mpTickButton->dimensions.x += MIN_SPACE + maxTextSpace;
+			break;
+
+		case InputMethod::ACTION:
+			input.mpActionButton->dimensions.x += MIN_SPACE + maxTextSpace;
 			break;
 	}
 }
@@ -329,6 +351,9 @@ OptionInfo *Option::GetData(){
 		case InputMethod::TICK:
 			return new OptionInfo(mOptionID, input.mpTickButton->GetValue());
 
+		case InputMethod::ACTION:
+			return new OptionInfo(mOptionID, true);
+
 		default:
 			return new OptionInfo();
 	}
@@ -351,17 +376,19 @@ void Option::HandleInfo(std::string_view info){
 
 	switch(inputMethod){
 		case 'F':
-			SetInputMethod(Option::InputMethod::TEXT_FIELD); break;
+			SetInputMethod(InputMethod::TEXT_FIELD); break;
 		case 'H':
-			SetInputMethod(Option::InputMethod::HEX_TEXT_FIELD); break;
+			SetInputMethod(InputMethod::HEX_TEXT_FIELD); break;
 		case 'W':
-			SetInputMethod(Option::InputMethod::WHOLE_TEXT_FIELD); break;
+			SetInputMethod(InputMethod::WHOLE_TEXT_FIELD); break;
 		case 'T':
-			SetInputMethod(Option::InputMethod::TICK); break;
+			SetInputMethod(InputMethod::TICK); break;
+		case 'A':
+			SetInputMethod(InputMethod::ACTION); break;
 		case 'S':
-			SetInputMethod(Option::InputMethod::SLIDER); break;	
+			SetInputMethod(InputMethod::SLIDER); break;	
 		case 'C':
-			SetInputMethod(Option::InputMethod::CHOICES_ARRAY); break;
+			SetInputMethod(InputMethod::CHOICES_ARRAY); break;
 		default:
 			ErrorPrint("Invalid input method: "+inputMethod); break;
 	}
@@ -378,6 +405,7 @@ void Option::HandleInfo(std::string_view info){
 	}
 }
 
+//TODO: create a function/method for each input method, so that calculating its dimensions is consistent across different methods
 void Option::SetInputMethod(Option::InputMethod nInputMethod){
 	mInputMethod = nInputMethod;
 	switch(mInputMethod){
@@ -410,7 +438,14 @@ void Option::SetInputMethod(Option::InputMethod nInputMethod){
 		case InputMethod::TICK:
 			input.mpTickButton = new TickButton(SDL_Rect{MIN_SPACE, MIN_SPACE, mDimensions.h-MIN_SPACE*2, mDimensions.h-MIN_SPACE*2});
 			break;
+
+		case InputMethod::ACTION:
+			input.mpActionButton = new ActionButton(SDL_Rect{MIN_SPACE, MIN_SPACE, (mDimensions.h-MIN_SPACE)*2, mDimensions.h-MIN_SPACE*2});
+			break;
 		
+		default:
+			ErrorPrint("Invalid input method: "+std::to_string(static_cast<int>(mInputMethod)));
+			break;
 	}
 }
 
@@ -464,6 +499,9 @@ void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view n
 		}
 		case Option::InputMethod::TICK:
 			pOption->input.mpTickButton->SetValue(nValue.size() == 1 && nValue[0] == 'T');
+			break;
+		case Option::InputMethod::ACTION:
+			DebugPrint("Input method ACTION can't have an initial value nor a value in general");
 			break;
 		default:
 			ErrorPrint("Option doesn't have a valid input method, value: "+std::string(nValue));
@@ -545,7 +583,8 @@ void Option::OptionCommands::UnusableInfo(Option *pOption, std::string_view nUnu
 
 //INTERNAL WINDOW METHODS:
 
-InternalWindow::InternalWindow(SDL_Point optionsSize, InitializationData nData) : M_WINDOW_NAME(nData.windowName){
+InternalWindow::InternalWindow(SDL_Point optionsSize, InitializationData nData, SDL_Renderer *pRenderer) : M_WINDOW_NAME(nData.windowName), mpIcon(LoadTexture(("Sprites/"+nData.windowName+".png").c_str(), pRenderer)){
+
 	Option::OptionCommands::LoadCommands();
 
 	mOptions.reserve(nData.dataAmount);
@@ -612,6 +651,22 @@ const std::string_view InternalWindow::GetName(){
 	return M_WINDOW_NAME;
 }
 
+void InternalWindow::Minimize(){
+	if(!mMinimized){
+		mPreMiniSize.x = mDimensions.w;
+		mPreMiniSize.y = mDimensions.h;
+		mDimensions.w = M_MIN_SIZE.x;
+		mDimensions.h = M_MIN_SIZE.y;
+	} else {
+		mDimensions.w = mPreMiniSize.x;
+		mDimensions.h = mPreMiniSize.y;
+		UpdateContentDimensions();
+	}
+
+	mMinimized = !mMinimized;
+	mDraggedState = DraggedState::NONE;
+}
+
 bool InternalWindow::HandleEvent(SDL_Event *event){
 	SDL_Point originalMousePosition;
 	int *eventMouseX = nullptr, *eventMouseY = nullptr;
@@ -629,7 +684,17 @@ bool InternalWindow::HandleEvent(SDL_Event *event){
 			break;
 
 		case SDL_MOUSEBUTTONDOWN:
-			if(Border clickedBorder; PointInsideInnerBorder({event->button.x, event->button.y}, &clickedBorder)) {
+			if(mMinimized){
+				SDL_Point mousePos = {event->button.x, event->button.y};
+				if(SDL_PointInRect(&mousePos, &mDimensions) == SDL_TRUE){
+					mDraggedState = DraggedState::MOVEMENT;
+					mDraggedData.x = mDimensions.x - event->button.x;
+					mDraggedData.y = mDimensions.y - event->button.y;
+					return true;
+				}
+				return false;
+			}
+			else if(Border clickedBorder; PointInsideInnerBorder({event->button.x, event->button.y}, &clickedBorder)) {
 				wasEventHandled = true;
 				if(!mResizeOnDrag){
 					mDraggedState = DraggedState::MOVEMENT;
@@ -696,7 +761,8 @@ bool InternalWindow::HandleEvent(SDL_Event *event){
 			}
 
 			if(wasEventHandled) return true;
-		
+			else if(mMinimized) return false;
+
 			//In case of mouse motion we do not care if it occurs outside of the window, as something like a slider could be dragged
 			MakeEventRelativeToRect(mContentDimensions, event->motion.x, event->motion.y, originalMousePosition, eventMouseX, eventMouseY, false);
 			break;
@@ -704,6 +770,8 @@ bool InternalWindow::HandleEvent(SDL_Event *event){
 
 		case SDL_MOUSEBUTTONUP:
 			mDraggedState = DraggedState::NONE;
+
+			if(mMinimized) return false;
 			
 			//In case of mouse up we do not care if it occurs outside of the window, as something like a slider could be dragged
 			MakeEventRelativeToRect(mContentDimensions, event->button.x, event->button.y, originalMousePosition, eventMouseX, eventMouseY, false);
@@ -711,11 +779,16 @@ bool InternalWindow::HandleEvent(SDL_Event *event){
 
 		case SDL_MOUSEWHEEL:
 
+			if(mMinimized) return false;
+
 			//The mouse wheel we want to ensure it occurs inside the window, otherwise it should be handled by another window or the canvas itself
 			if(MakeEventRelativeToRect(mContentDimensions, event->wheel.mouseX, event->wheel.mouseY, originalMousePosition, eventMouseX, eventMouseY)) return false;
 			break;
 	}
 
+	if(mMinimized){
+		return wasEventHandled || wasWindowClicked;
+	}
 	//Options handle the event
 	//We do not check 'wasEventHandled' before as it shouldn't be true if the flow has reached here
 	for(auto &option : mOptions){
@@ -739,17 +812,22 @@ void InternalWindow::Update(float deltaTime){
 }
 
 void InternalWindow::Draw(SDL_Renderer *pRenderer){
-	FillRect(pRenderer, mDimensions, 100, 100, 100); // border
+	if(mMinimized){
+		if(mpIcon.get() != nullptr) DisplayTexture(pRenderer, mpIcon.get(), &mDimensions);
+		else 						FillRect(pRenderer, mDimensions, 100, 100, 100);
+	} else {
+		FillRect(pRenderer, mDimensions, 100, 100, 100); // border
 
-	FillRect(pRenderer, mContentDimensions, 200, 200, 200); 
+		FillRect(pRenderer, mContentDimensions, 200, 200, 200); 
 
-	SDL_RenderSetViewport(pRenderer, &mContentDimensions);
+		SDL_RenderSetViewport(pRenderer, &mContentDimensions);
 
-	for(auto &option : mOptions){
-		option->Draw(pRenderer);
-	};
+		for(auto &option : mOptions){
+			option->Draw(pRenderer);
+		};
 
-	SDL_RenderSetViewport(pRenderer, nullptr);
+		SDL_RenderSetViewport(pRenderer, nullptr);
+	}
 }
 
 std::vector<std::shared_ptr<OptionInfo>> InternalWindow::GetData(){
@@ -765,47 +843,47 @@ std::vector<std::shared_ptr<OptionInfo>> InternalWindow::GetData(){
 	return data;
 }
 
-bool InternalWindow::MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventMouseX, int &eventMouseY, SDL_Point &originalMousePosition, bool resetIfUnable){
+bool InternalWindow::MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, bool resetIfUnable){
 	//First we set the mouse original position
-	originalMousePosition.x = eventMouseX;
-	originalMousePosition.y = eventMouseY;
+	originalMousePosition.x = eventX;
+	originalMousePosition.y = eventY;
 
 	//Then we change the coordinates and check if it falls inside the window
-	eventMouseX -= dimensions.x;
-	eventMouseY -= dimensions.y;
+	eventX -= dimensions.x;
+	eventY -= dimensions.y;
 
-	if(eventMouseX >= 0 && eventMouseX < dimensions.w && eventMouseY >= 0 && eventMouseY < dimensions.h){
+	if(eventX >= 0 && eventX < dimensions.w && eventY >= 0 && eventY < dimensions.h){
 		return false;
 	}
 
 	//If it doesn't we set the values back and return true, as it falls outside the rect
 	if(resetIfUnable){
-		eventMouseX = originalMousePosition.x;
-		eventMouseY = originalMousePosition.y;
+		eventX = originalMousePosition.x;
+		eventY = originalMousePosition.y;
 	}
 	return true;
 }
 
-bool InternalWindow::MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventMouseX, int &eventMouseY, SDL_Point &originalMousePosition, int *&pEventX, int *&pEventY, bool resetIfUnable){
+bool InternalWindow::MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, int *&pEventX, int *&pEventY, bool resetIfUnable){
 	//First we set the mouse original position and the pointers 
-	originalMousePosition.x = eventMouseX;
-	originalMousePosition.y = eventMouseY;
+	originalMousePosition.x = eventX;
+	originalMousePosition.y = eventY;
 	
-	pEventX = &eventMouseX;
-	pEventY = &eventMouseY;
+	pEventX = &eventX;
+	pEventY = &eventY;
 
 	//Then we change the coordinates and check if it falls inside the window
-	eventMouseX -= dimensions.x;
-	eventMouseY -= dimensions.y;
+	eventX -= dimensions.x;
+	eventY -= dimensions.y;
 	
-	if(eventMouseX >= 0 && eventMouseX < dimensions.w && eventMouseY >= 0 && eventMouseY < dimensions.h){
+	if(eventX >= 0 && eventX < dimensions.w && eventY >= 0 && eventY < dimensions.h){
 		return false;
 	}
 
 	//If it doesn't we set the values back and return true, as it falls outside the rect
 	if(resetIfUnable){
-		eventMouseX = originalMousePosition.x;
-		eventMouseY = originalMousePosition.y;
+		eventX = originalMousePosition.x;
+		eventY = originalMousePosition.y;
 	}
 	return true;
 }
@@ -1079,7 +1157,18 @@ void AppManager::HandleEvent(SDL_Event *event){
 
 	//We handle the events counter clockwise in order that those windows drawn last (and therefore may overlap others) are the ones who first get the events
 	for(auto it = mInternalWindows.rbegin(); it != mInternalWindows.rend(); it++){
-		if(!hasBeenHandled) hasBeenHandled = (*it)->HandleEvent(event);
+		hasBeenHandled = (*it)->HandleEvent(event);
+
+		if(hasBeenHandled){
+			SDL_Keymod keymod = SDL_GetModState();
+			if(keymod & KMOD_CTRL){
+				auto base = (it+1).base();
+				std::rotate(base, base+1, mInternalWindows.end());
+			} else if(keymod & KMOD_ALT){
+				(*it)->Minimize();
+			}
+			break;
+		}
 	}
 
 	ProcessWindowsData();
@@ -1184,7 +1273,7 @@ void AppManager::InitializeWindow(const std::string &windowName){
 			}
 		}
 
-		mInternalWindows.push_back(std::make_unique<InternalWindow>(SDL_Point{200, 28}, InternalWindow::InitializationData{windowName, options, file}));
+		mInternalWindows.push_back(std::make_unique<InternalWindow>(SDL_Point{200, 28}, InternalWindow::InitializationData{windowName, options, file}, mpRenderer.get()));
 
 		windowFile.close();
 	} else {
@@ -1349,7 +1438,7 @@ void AppManager::ProcessWindowsData(){
 							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
 							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
 						} else {
-							DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+							ErrorPrint("ADD_LAYER data was false! (Should never happen)");
 						}
 					};
 					std::function<void(bool)> fn = mLambda;
@@ -1365,7 +1454,7 @@ void AppManager::ProcessWindowsData(){
 							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
 							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
 						} else {
-							DebugPrint("A simple button will be added in the future, currently a tick button is good enough");
+							ErrorPrint("REMOVE_CURRENT_LAYER data was false! (Should never happen)");
 						}
 					};
 					std::function<void(bool)> fn = mLambda;
@@ -1393,7 +1482,7 @@ void AppManager::ProcessWindowsData(){
 				case OptionInfo::OptionIDs::NEW_CANVAS_CREATE:{
 					auto mLambda = [this, &i](bool newCanvas){
 						if(!newCanvas){
-							DebugPrint("Data was false (should only occur in internal window's creation)");
+							ErrorPrint("NEW_CANVAS_CREATE data was false! (Should never happen)");
 						} else {
 							auto &temporalData = mInternalWindows[i]->GetTemporalData();
 							

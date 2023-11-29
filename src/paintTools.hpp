@@ -182,7 +182,26 @@ class TextField{
     SDL_Color mTextColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
 };
 
-//A button that, when clicked, its internal value switches from true to false and viceversa
+//A button that can be clicked. It has no internal value that changes, other than its dimensions and its color
+class ActionButton{
+    public:
+
+    SDL_Rect dimensions;
+
+    ActionButton(SDL_Rect nDimensions);
+
+    bool HandleEvent(SDL_Event *event);
+
+    void Draw(SDL_Renderer *pRenderer);
+
+    private:
+
+    static constexpr SDL_Color IDLE_COLOR = {210, 210, 210};
+    static constexpr SDL_Color HOLDED_COLOR = {160, 160, 160};
+    SDL_Color mDrawColor = IDLE_COLOR;
+};
+
+//A button that, when clicked, its internal value switches from true to false and vice versa
 class TickButton{
     public:
     
