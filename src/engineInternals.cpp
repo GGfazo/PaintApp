@@ -1075,17 +1075,17 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
         mHeight = nHeight;
     }
 
-    mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE ));
+    mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC ));
 
+	mMainBarHeight = 20;
+	mpMainBar.reset(new MainBar({0, 0, mWidth, mMainBarHeight}));
+	
 	mpCanvas.reset(new Canvas(mpRenderer.get(), 1, 1));
 	mpCanvas->viewport = {0, mMainBarHeight, mWidth, mHeight-mMainBarHeight};
 	mpCanvas->SetSavePath("NewImage.png");
 	NewCanvas(100, 100);
 	InitializeFromFile();
 
-	mMainBarHeight = 20;
-	mpMainBar.reset(new MainBar({0, 0, mWidth, mMainBarHeight}));
-	
 	InitializeWindow("PencilWindow");
 	InitializeWindow("LayerWindow");
 }
@@ -1179,6 +1179,16 @@ void AppManager::HandleEvent(SDL_Event *event){
 void AppManager::Update(float deltaTime){
 	static float windowTimer = 0.0f;
 	windowTimer += deltaTime*0.1f;
+
+	static float frameTime = 0.0f;
+	static int frames = 0;
+	frameTime += deltaTime;
+	frames++;
+	if(frameTime >= 1.0f){
+		DebugPrint("FPS: "+std::to_string(frames/frameTime));
+		frameTime = 0;
+		frames = 0;
+	}
 
 	for(auto &window : mInternalWindows) window->Update(deltaTime);
 

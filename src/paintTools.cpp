@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <functional>
 #include <algorithm>
+#include <future>
 
 void *TextInputManager::mRequester = nullptr;
 
@@ -749,7 +750,7 @@ int Pencil::GetRadius(){
 void Pencil::SetHardness(float nHardness){
 	mHardness = std::clamp(nHardness, 0.0f, 1.0f);
 	//If the pencil is hard, then hardness has no effect on the pixels alphas
-	if(mPencilType != PencilType::HARD) UpdateCircleAlphas();
+	if(mPencilType != PencilType::HARD) UpdateCirclePixels();
 }
 
 float Pencil::GetHardness(){
@@ -759,41 +760,43 @@ float Pencil::GetHardness(){
 void Pencil::SetAlphaCalculation(AlphaCalculation nAlphaCalculation){
 	mAlphaCalculation = nAlphaCalculation;
 	//If the pencil is hard, then alpha calculation mode has no effect on the pixels alphas
-	if(mPencilType != PencilType::HARD) UpdateCircleAlphas();
+	if(mPencilType != PencilType::HARD) UpdateCirclePixels();
 }
 
 void Pencil::SetPencilType(PencilType nPencilType){
 	mPencilType = nPencilType;
-	UpdateCircleAlphas();
+	UpdateCirclePixels();
 }
  
-std::vector<SDL_Point> Pencil::GetAffectedPixels(SDL_Point pixel, SDL_Rect *usedArea){
-	std::vector<SDL_Point> result(mCirclePixels.size());
-	
-	std::transform(mCirclePixels.cbegin(), mCirclePixels.cend(), result.begin(), [&pixel](const Pencil::DrawPoint &nPoint){
-		return SDL_Point{nPoint.pos.x + pixel.x, nPoint.pos.y + pixel.y};
-	});
-	
-	if(usedArea){
-		*usedArea = {pixel.x - mRadius, pixel.y - mRadius, 2*mRadius+1, 2*mRadius+1};
-	}
-
-	return result;
+SDL_Surface *Pencil::GetCircleSurface(){
+	return mpCircleSurface.get();
 }
 
-std::vector<Pencil::DrawPoint> Pencil::ApplyOn(SDL_Point pixel, SDL_Rect *usedArea){
-	std::vector<Pencil::DrawPoint> result(mCirclePixels);
+void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea){
+	int smallestX = INT_MAX, biggestX = INT_MIN, smallestY = INT_MAX, biggestY = INT_MIN;
 
-	for(auto &drawPoint : result){
-		drawPoint.pos.x += pixel.x;
-		drawPoint.pos.y += pixel.y;
-	}
-	 
-	if(usedArea){
-		*usedArea = {pixel.x - mRadius, pixel.y - mRadius, 2*mRadius+1, 2*mRadius+1};
-	}
+	for(const auto &center : circleCenters){
+		SDL_Rect drawArea = {center.x - mRadius, center.y - mRadius, 0, 0}; // We do not use '2*mRadius+1' for width or height since it is not used by SDL_BlitSurface
+		
+		SDL_SetSurfaceColorMod(mpCircleSurface.get(), circleColor.r, circleColor.g, circleColor.b);
+		SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), circleColor.a);
 
-	return result;
+		SDL_BlitSurface(mpCircleSurface.get(), nullptr, pSurfaceToModify, &drawArea);
+
+		if(smallestX > center.x) smallestX = center.x;
+		if(biggestX < center.x) biggestX = center.x;
+		if(smallestY > center.y) smallestY = center.y;
+		if(biggestY < center.y) biggestY = center.y;
+	}
+	
+	SDL_SetSurfaceColorMod(mpCircleSurface.get(), 255, 255, 255);
+	SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), SDL_ALPHA_OPAQUE);
+
+	if(pTotalUsedArea != nullptr){
+		SDL_Rect actualArea = {smallestX - mRadius, smallestY - mRadius, (biggestX-smallestX) + 2*mRadius+1, (biggestY-smallestY) + 2*mRadius+1};
+		SDL_Rect surfaceArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h};
+		SDL_IntersectRect(&actualArea, &surfaceArea, pTotalUsedArea);
+	}
 }
 
 void Pencil::SetResolution(float nResolution){
@@ -818,54 +821,54 @@ void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 }
 
 void Pencil::UpdateCirclePixels(){
-	mCirclePixels.clear();
+	mpCircleSurface.reset(SDL_CreateRGBSurfaceWithFormat(0, 2*mRadius+1, 2*mRadius+1, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
+	SDL_Rect surfaceRect {0, 0, mpCircleSurface->w, mpCircleSurface->h};
+	SDL_FillRect(mpCircleSurface.get(), &surfaceRect, SDL_MapRGBA(mpCircleSurface->format, 255, 255, 255, 0));
+	SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BlendMode::SDL_BLENDMODE_BLEND);
 
-	SDL_Point center = {0, 0};
-	if(mRadius >= 19){
-		mCirclePixels.reserve(3.4*mRadius*mRadius);
-	} else {
-		int16_t sizes[19]{1, 9, 21, 45, 69, 97, 145, 185, 241, 293, 357, 437, 505, 593, 673, 773, 877, 981, 1093};
-		mCirclePixels.reserve(sizes[mRadius]);
-	}
+	//(mRadius, mRadius) is the middle pixel for the surface
+	const SDL_Point center = {mRadius, mRadius};
+	
+	//This is made in order not to write multiple times '.get()'. Not so much due to optimizing, but rather to avoid repetition
+	SDL_Surface *pCircleSurface = mpCircleSurface.get();
 
-	//Based on "Midpoint circle algorithm - Jesko's Method", but modified so that there are no repeating points
-    int x = 1, y = mRadius;
+	//Based on "Midpoint circle algorithm - Jesko's Method", in such a way so that there are no repeating points
+    int x = 0, y = mRadius;
 	int t1 = mRadius/16, t2;
-	FillHorizontalLine(center.y, center.x-y, center.x+y, center, mCirclePixels);
-	while(y > x){
-		FillHorizontalLine(center.y+x, center.x-y, center.x+y, center, mCirclePixels);
-		FillHorizontalLine(center.y-x, center.x-y, center.x+y, center, mCirclePixels);
 
+	auto circleCicle = [&](){
 		x++;
 		t1 += x;
 		t2 = t1 - y;
 		if(t2 >= 0){
 			int xMinus = x-1;
-			FillHorizontalLine(center.y+y, center.x-xMinus, center.x+xMinus, center, mCirclePixels);
-			FillHorizontalLine(center.y-y, center.x-(x-1), center.x+(x-1), center, mCirclePixels);
+			if(xMinus!=y){
+				FillHorizontalLine(center.y+y, center.x-xMinus, center.x+xMinus, center, pCircleSurface);
+				FillHorizontalLine(center.y-y, center.x-xMinus, center.x+xMinus, center, pCircleSurface);
+			}
 			t1 = t2;
 			y--;
 		} 
-	}
-	if(y == x){
-		FillHorizontalLine(center.y+x, center.x-y, center.x+y, center, mCirclePixels);
-		FillHorizontalLine(center.y-x, center.x-y, center.x+y, center, mCirclePixels);
+	};
+
+	FillHorizontalLine(center.y, center.x-y, center.x+y, center, pCircleSurface);
+	circleCicle();
+	
+	while(y >= x){
+		FillHorizontalLine(center.y+x, center.x-y, center.x+y, center, pCircleSurface);
+		FillHorizontalLine(center.y-x, center.x-y, center.x+y, center, pCircleSurface);
+
+		circleCicle();
 	}
 }
 
-void Pencil::UpdateCircleAlphas(){
-	for(auto &pixel : mCirclePixels){
-		SetPixelAlpha({0, 0}, pixel);
-	}
-}
-
-void Pencil::SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel){
+Uint8 Pencil::GetPixelAlpha(const SDL_Point &center, const SDL_Point &pixel){
 	if(mPencilType ==  PencilType::HARD){
-		pixel.alpha = SDL_ALPHA_OPAQUE;
+		return SDL_ALPHA_OPAQUE;
 	
 	} else if(mPencilType ==  PencilType::SOFT){
 		//TODO: modify hardness system (mHardness = 1 doesn't make all the pixels fully opaque (and (mRadius+1)*mHardness is a bit of an overkill))
-		float centerDistance = sqrt(pow(pixel.pos.x-center.x, 2) + pow(pixel.pos.y-center.y, 2));
+		float centerDistance = sqrt(pow(pixel.x-center.x, 2) + pow(pixel.y-center.y, 2));
 		float maxDistance = mRadius*mHardness;
 		Uint8 alpha;
 		
@@ -884,16 +887,17 @@ void Pencil::SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel){
 				break;
 		}
 
-		pixel.alpha = alpha;
+		return alpha;
 	}
+
+	return -1;
 }
 
-void Pencil::FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points){
+void Pencil::FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, SDL_Surface *pSurface){
 	for(int x = minX; x <= maxX; ++x){
-		DrawPoint newPixel = {x, y, 0};
-		SetPixelAlpha(circleCenter, newPixel);
-	
-		if(newPixel.alpha != 0) points.push_back(newPixel);
+		SDL_Point pos {x, y};
+		SDL_Rect surf {0, 0, pSurface->w, pSurface->h};
+		if(SDL_PointInRect(&pos, &surf) == SDL_TRUE)*UnsafeGetPixelFromSurface<Uint32>({x, y}, pSurface) = SDL_MapRGBA(pSurface->format, 255, 255, 255, GetPixelAlpha(circleCenter, {x, y}));
 	}
 }
 
@@ -940,7 +944,7 @@ void Pencil::UpdatePreviewRects(){
 		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * (auxiliar.y + auxiliar.h - 1)), center.y - (int)ROUND(resolution * (auxiliar.x + auxiliar.w - 1)), (int)ROUND(resolution * auxiliar.h), (int)ROUND(resolution * auxiliar.w));
 	};
 
-	int x = 1, y = radius;
+	int x = 0, y = radius;
 	int t1 = radius/16, t2;
 	
 	mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * radius), center.y, (int)ROUND(resolution), (int)ROUND(resolution));
@@ -973,30 +977,6 @@ void Pencil::UpdatePreviewRects(){
 		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * x), center.y + (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
 		mPreviewRects.emplace_back(center.x - (int)ROUND(resolution * x), center.y - (int)ROUND(resolution * y), (int)ROUND(resolution), (int)ROUND(resolution));
 	}
-}
-
-//PENCIL MODIFIER METHODS:
-
-PencilModifier::PencilModifier(Pencil &nModifyPencil, SDL_Rect nDimensions) : 
-	mModifyPencil(nModifyPencil), dimensions(nDimensions){}
-
-void PencilModifier::SetModifiedPencil(Pencil &nModifyPencil){
-	mModifyPencil = nModifyPencil;
-}
-
-bool PencilModifier::HandleEvent(SDL_Event *event){
-	//if(event->type == )
-
-	//After local handling, call HandleEvent on all instances holded
-	return false;
-}
-
-void PencilModifier::Update(float deltaTime){
-
-}
-
-void PencilModifier::Draw(SDL_Renderer* pRenderer){
-	DrawRect(pRenderer, dimensions, {0, 0, 0, 255});
 }
 
 //MUTABLE TEXTURE METHODS:
@@ -1052,6 +1032,17 @@ void MutableTexture::Clear(const SDL_Color &clearColor){
 }
 
 void MutableTexture::ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor){
+	/*
+	The following may be added if shown to improve speed in cases
+	if(appliedColor.a == 255){
+		baseColor.a = appliedColor.a;
+		baseColor.r = appliedColor.r;
+		baseColor.g = appliedColor.g;
+		baseColor.b = appliedColor.b;
+		return;
+	}
+	*/
+
 	float bsA = baseColor.a/255.0f, bsR = baseColor.r/255.0f, bsG = baseColor.g/255.0f, bsB = baseColor.b/255.0f;
 	float apA = appliedColor.a/255.0f, apR = appliedColor.r/255.0f, apG = appliedColor.g/255.0f, apB = appliedColor.b/255.0f;
 	float resultA = apA+bsA*(1-apA);
@@ -1059,6 +1050,7 @@ void MutableTexture::ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &ap
 	baseColor.r = SDL_ALPHA_OPAQUE*((apR*apA+bsR*bsA*(1-apA))/resultA);
 	baseColor.g = SDL_ALPHA_OPAQUE*((apG*apA+bsG*bsA*(1-apA))/resultA);
 	baseColor.b = SDL_ALPHA_OPAQUE*((apB*apA+bsB*bsA*(1-apA))/resultA);
+
 	/*
 	//The following procedure comes from https://en.wikipedia.org/wiki/Alpha_compositing gamma correction:
 	baseColor.r = SDL_ALPHA_OPAQUE*sqrt((apR*apR*apA+bsR*bsR*bsA*(1-apA))/(apA+bsA*(1-apA)));
@@ -1073,7 +1065,7 @@ void MutableTexture::SetPixel(SDL_Point pixel, const SDL_Color &color){
         return;
     }
 
-	//It is safe to call UnsafeSetPixel, since we already locked the surface and checked that the localPixel does exist
+	//It is safe to call 'SetPixelUnsafe', since we already locked the surface and checked that the localPixel does exist
     SetPixelUnsafe(pixel, color);
 }
 
@@ -1083,22 +1075,6 @@ void MutableTexture::SetPixels(std::span<SDL_Point> pixels, const SDL_Color &col
 			continue;
 		}
 		SetPixelUnsafe(pixel, color);
-	}
-}
-
-void MutableTexture::SetDrawnPixels(std::span<Pencil::DrawPoint> pixels, const SDL_Color &color){
-	SDL_Color aux;
-	float alphaMultiplication = color.a*1.0f/SDL_ALPHA_OPAQUE;
-	Uint8 resultingAlpha;
-	for(const auto &pixel : pixels){
-		if(IsPixelOutsideImage(pixel.pos)){
-			continue;
-		}
-		SDL_GetRGBA(*UnsafeGetPixel(pixel.pos), mSurfaces[mSelectedLayer]->format, &aux.r, &aux.g, &aux.b, &aux.a);
-		
-		resultingAlpha = pixel.alpha * alphaMultiplication;
-		ApplyColorToColor(aux, SDL_Color{color.r, color.g, color.b, resultingAlpha});
-		SetPixelUnsafe(pixel.pos, aux);
 	}
 }
 
@@ -1116,37 +1092,33 @@ void MutableTexture::SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Colo
 	mChangedPixels.insert(mChangedPixels.end(), pixels.begin(), pixels.end());
 }
 
-void MutableTexture::SetDrawnPixelsUnsafe(std::span<Pencil::DrawPoint> pixels, const SDL_Color &color){
-	SDL_Color aux;
-	
-	float alphaMultiplication = color.a*1.0f/SDL_ALPHA_OPAQUE;
-	Uint8 resultingAlpha;
-
-	for(const auto &pixel : pixels){
-		SDL_GetRGBA(*UnsafeGetPixel(pixel.pos), mSurfaces[mSelectedLayer]->format, &aux.r, &aux.g, &aux.b, &aux.a);
-
-		resultingAlpha = pixel.alpha * alphaMultiplication;
-		ApplyColorToColor(aux, SDL_Color{color.r, color.g, color.b, resultingAlpha});
-		SetPixelUnsafe(pixel.pos, aux);
-	}
-
+SDL_Surface *MutableTexture::GetCurrentSurface(){
+	return mSurfaces[mSelectedLayer].get();
 }
 
 void MutableTexture::UpdateTexture(){
 	if(mChangedPixels.empty()) return;
 
-	SDL_Surface *texturesSurface;
-	SDL_Rect changedRect = GetChangesRect();
+	UpdateTexture(GetChangesRect());
 
-	SDL_LockTextureToSurface(mTextures[mSelectedLayer].get(), &changedRect, &texturesSurface);
+	mChangedPixels.clear();
+}
+
+void MutableTexture::UpdateTexture(const SDL_Rect &rect){
+	if(rect.w <= 0 || rect.h <= 0){
+		ErrorPrint("limitating rect's width or height was less than or equal to 0 (must at least be 1)");
+		return;
+	}
+
+	SDL_Surface *texturesSurface;
+
+	SDL_LockTextureToSurface(mTextures[mSelectedLayer].get(), &rect, &texturesSurface);
 	
 	SDL_SetSurfaceBlendMode(mSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_NONE);
-	SDL_BlitSurface(mSurfaces[mSelectedLayer].get(), &changedRect, texturesSurface, nullptr);
+	SDL_BlitSurface(mSurfaces[mSelectedLayer].get(), &rect, texturesSurface, nullptr);
 	SDL_SetSurfaceBlendMode(mSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	
 	SDL_UnlockTexture(mTextures[mSelectedLayer].get());
-
-	mChangedPixels.clear();
 }
 
 void MutableTexture::AddLayer(SDL_Renderer *pRenderer){
@@ -1299,53 +1271,24 @@ void Canvas::SetColor(SDL_Color nDrawColor){
 }
 
 void Canvas::DrawPixel(SDL_Point localPixel){
+	SDL_Rect usedArea{0, 0, 0, 0}, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+
+	std::vector<SDL_Point> pixels{localPixel};
+	pencil.ApplyOn(pixels, mDrawColor, mpImage->GetCurrentSurface(), &usedArea);
+	mpImage->UpdateTexture(usedArea);
+
 	mLastMousePixel = localPixel;
-
-	SDL_Rect usedArea, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
-
-	std::vector<Pencil::DrawPoint> pixelsToDraw = pencil.ApplyOn(localPixel, &usedArea);
-
-	if(!IsRectCompletelyInsideRect(usedArea, imageRect)){
-		
-		//If the rects do not even intersect, then there's no need to try drawing any pixel
-		if(!SDL_HasIntersection(&usedArea, &imageRect)){
-			return;
-		}
-		
-		mpImage->SetDrawnPixels(pixelsToDraw, mDrawColor);
-	}
-	else {
-		
-		//We call an unsafe method since we know all the pixels fall inside the image
-		mpImage->SetDrawnPixelsUnsafe(pixelsToDraw, mDrawColor);
-	}
 
 }
 
 void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
-	SDL_Rect usedArea, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
-		
-    mLastMousePixel = localPixels.back();
-
-	//TODO: make faster (parallelize?)
-	for(const auto& pixel : localPixels){
-		std::vector<Pencil::DrawPoint> pixelsToDraw = pencil.ApplyOn(pixel, &usedArea);
+	SDL_Rect usedArea{0, 0, 0, 0}, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
 	
-		if(!IsRectCompletelyInsideRect(usedArea, imageRect)){
-			
-			//If the rects do not even intersect, then there's no need to try drawing any pixel
-			if(!SDL_HasIntersection(&usedArea, &imageRect)){
-				continue;
-			}
+	std::vector<SDL_Point> pixels(localPixels);
+	pencil.ApplyOn(pixels, mDrawColor, mpImage->GetCurrentSurface(), &usedArea);
+	mpImage->UpdateTexture(usedArea);
 
-			mpImage->SetDrawnPixels(pixelsToDraw, mDrawColor);
-		}
-		else {
-			//We call an unsafe method since we know all the pixels fall inside the image
-			mpImage->SetDrawnPixelsUnsafe(pixelsToDraw, mDrawColor);
-		}
-
-	}
+    mLastMousePixel = localPixels.back();
 }
 
 void Canvas::Clear(std::optional<SDL_Color> clearColor){
@@ -1395,10 +1338,10 @@ void Canvas::HandleEvent(SDL_Event *event){
 				break;
 
 			case Tool::ERASE_TOOL:{
-				//Temporal solution until Tool base class
-				std::vector<SDL_Point> pixels = pencil.GetAffectedPixels(pixel, nullptr);
+				//TODO: add Tool base class and system
+				/*std::vector<SDL_Point> pixels = pencil.GetAffectedPixels(pixel, nullptr);
 				mpImage->SetPixels(pixels, {0, 0, 0, SDL_ALPHA_TRANSPARENT});
-				mLastMousePixel = pixel;
+				mLastMousePixel = pixel;*/
 				break;
 			}
 
@@ -1433,13 +1376,13 @@ void Canvas::HandleEvent(SDL_Event *event){
 					break;
 
 				case Tool::ERASE_TOOL:{
-					//Temporal solution until Tool base class
-					std::vector<SDL_Point> mainPixels = GetPointsInSegment(mLastMousePixel, pixel);
+					//TODO: add Tool base class and system
+					/*std::vector<SDL_Point> mainPixels = GetPointsInSegment(mLastMousePixel, pixel);
 					for(auto nPixel : mainPixels){
 						std::vector<SDL_Point> pixels = pencil.GetAffectedPixels(nPixel, nullptr);
 						mpImage->SetPixels(pixels, {0, 0, 0, SDL_ALPHA_TRANSPARENT});
 					}
-					mLastMousePixel = mainPixels.back();
+					mLastMousePixel = mainPixels.back();*/
 					break;
 				}
 
@@ -1454,10 +1397,10 @@ void Canvas::HandleEvent(SDL_Event *event){
 					break;
 
 				case Tool::ERASE_TOOL:{
-					//Temporal solution until Tool base class
-					std::vector<SDL_Point> pixels = pencil.GetAffectedPixels(pixel, nullptr);
+					//TODO: add Tool base class and system
+					/*std::vector<SDL_Point> pixels = pencil.GetAffectedPixels(pixel, nullptr);
 					mpImage->SetPixels(pixels, {0, 0, 0, SDL_ALPHA_TRANSPARENT});
-					mLastMousePixel = pixel;
+					mLastMousePixel = pixel;*/
 					break;
 				}
 

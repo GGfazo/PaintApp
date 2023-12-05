@@ -157,3 +157,11 @@ inline bool IsRectCompletelyInsideRect(const SDL_Rect &contained, const SDL_Rect
             ((mainRect.x + mainRect.w) >= (contained.x + contained.w)) && 
             ((mainRect.y + mainRect.h) >= (contained.y + contained.h));
 }
+
+//Returns the pixel from a surface at the specified position.
+//It is unsafe since it does not check that the pixel lays in the surface nor does it lock the surface if needed.
+//The returned type should be set depending on the 'BytesPerPixel' (1 -> Uint8, 4 -> Uint32...)
+template <typename PixelType>
+inline PixelType *UnsafeGetPixelFromSurface(SDL_Point pixelPosition, SDL_Surface *pSurface){
+    return (PixelType*)((Uint8*)pSurface->pixels + pixelPosition.y * pSurface->pitch + pixelPosition.x * pSurface->format->BytesPerPixel);
+}

@@ -1,6 +1,7 @@
 #pragma once
 #include "SDL.h"
 #include "SDL_ttf.h"
+#include "renderLib.hpp"
 #include <string>
 #include <memory>
 #include <vector>
@@ -340,11 +341,6 @@ struct Pencil{
         EXPONENTIAL //The alpha value decreases exponentially (e.g: alpha = exp(e, -k*(distance/radius)), where k is a constant value)
     };
 
-    struct DrawPoint{
-        SDL_Point pos = {0, 0};
-        Uint8 alpha = 0;
-    };
-
     //SetRadius calls UpdatePreviewRects
     void SetRadius(int nRadius);
     int GetRadius();
@@ -355,8 +351,11 @@ struct Pencil{
     void SetAlphaCalculation(AlphaCalculation nAlphaCalculation);
     void SetPencilType(PencilType nPencilType);
 
-        std::vector<SDL_Point> GetAffectedPixels(SDL_Point pixel, SDL_Rect *usedArea);
-    std::vector<DrawPoint> ApplyOn(SDL_Point pixel, SDL_Rect *usedArea);
+    //TODO: this is a temporal solution to still have an erase tool
+    SDL_Surface *GetCircleSurface();
+
+    //Applies the current pencil to the passed surface on the given centers
+    void ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea = nullptr);
 
     //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
     void SetResolution(float nResolution);
@@ -376,39 +375,17 @@ struct Pencil{
     AlphaCalculation mAlphaCalculation = AlphaCalculation::LINEAR;
     PencilType mPencilType = PencilType::SOFT;
 
-    //Holds the relative positions for the pixels that should be coloured with the current radius, and their alpha values
-    std::vector<DrawPoint> mCirclePixels;
+    //Holds the pixels that should be coloured with the current radius, and their alpha values
+    std::unique_ptr<SDL_Surface, PointerDeleter> mpCircleSurface;
 
     //We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
 	std::vector<SDL_Rect> mPreviewRects;
     float mRectsResolution = 1.0f;
 
     void UpdateCirclePixels();
-    void UpdateCircleAlphas();
-    void SetPixelAlpha(const SDL_Point &center, DrawPoint &pixel);
-    void FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, std::vector<DrawPoint> &points);
+    Uint8 GetPixelAlpha(const SDL_Point &center, const SDL_Point &pixel);
+    void FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, SDL_Surface *points);
     void UpdatePreviewRects();
-};
-
-class PencilModifier{
-    public:
-
-    //A SDL_Rect is used instead of a SDL_FRect as the floating precission is not needed and there's support for SDL_Rect as a viewport 
-    SDL_Rect dimensions;
-
-    PencilModifier(Pencil &nModifyPencil, SDL_Rect nDimensions);
-    void SetModifiedPencil(Pencil &nModifyPencil);
-
-    bool HandleEvent(SDL_Event *event);
-    void Update(float deltaTime);
-    void Draw(SDL_Renderer* pRenderer);
-
-    private:
-    
-    //The pencil that gets the changes applied
-    Pencil &mModifyPencil;
-
-    //std::unique_ptr<TextField> mpPencilColor;
 };
 
 class MutableTexture{
@@ -426,13 +403,14 @@ class MutableTexture{
     //SetPixel methods. Both SetDrawnPixels blend the alpha of the pixel instead of just setting it
     void SetPixel(SDL_Point pixel, const SDL_Color &color);
     void SetPixels(std::span<SDL_Point> pixels, const SDL_Color &color);
-    void SetDrawnPixels(std::span<Pencil::DrawPoint> pixels, const SDL_Color &color); 
     void SetPixelUnsafe(SDL_Point pixel, const SDL_Color &color);
     void SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Color &color);
-    void SetDrawnPixelsUnsafe(std::span<Pencil::DrawPoint> pixels, const SDL_Color &color);
+    
+    SDL_Surface *GetCurrentSurface();
 
     //Updates the texture, applying all the changes made since the last call. Must be called outside the class
     void UpdateTexture();
+    void UpdateTexture(const SDL_Rect &rect);
 
     void AddLayer(SDL_Renderer *pRenderer);
     void DeleteCurrentLayer();
@@ -473,10 +451,10 @@ class MutableTexture{
         return (std::clamp(pixel.x, 0, mSurfaces[mSelectedLayer]->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mSurfaces[mSelectedLayer]->h-1) != pixel.y);
     }
     inline Uint32* UnsafeGetPixel(SDL_Point index){
-        return (Uint32*)((Uint8*)mSurfaces[mSelectedLayer]->pixels + index.y * mSurfaces[mSelectedLayer]->pitch + index.x * mSurfaces[mSelectedLayer]->format->BytesPerPixel);
+        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[mSelectedLayer].get());
     }
     inline Uint32* UnsafeGetPixel(SDL_Point index, int layer){
-        return (Uint32*)((Uint8*)mSurfaces[layer]->pixels + index.y * mSurfaces[layer]->pitch + index.x * mSurfaces[layer]->format->BytesPerPixel);
+        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[layer].get());
     }
 };
 
