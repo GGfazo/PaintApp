@@ -6,40 +6,6 @@
 #include <iostream>
 #include <algorithm>
 
-RenderedWindow::RenderedWindow(int width, int height, Uint32 flags, const char* windowsName, int x, int y){
-    pWindow = SDL_CreateWindow(windowsName, x, y, width, height, flags);
-
-    //Setting width and height, checking if it is a fullscreen window
-    if(flags & (SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MAXIMIZED)){ //Not need to check "flags & SDL_WINDOW_FULLSCREEN" because it is include in 'SDL_WINDOW_FULLSCREEN_DESKTOP'
-        SDL_DisplayMode DM;
-        SDL_GetCurrentDisplayMode(0, &DM);
-        windowsWidth = DM.w;
-        windowsHeight = DM.h;
-    } else {
-        windowsWidth = width;
-        windowsHeight = height;
-    }
-
-    pRenderer = SDL_CreateRenderer(pWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE );
-}
-RenderedWindow::~RenderedWindow(){
-    SDL_DestroyWindow(pWindow);
-    SDL_DestroyRenderer(pRenderer);
-}
-void RenderedWindow::UpdateInternalDimensions(){
-	SDL_GetRendererOutputSize(pRenderer, &windowsWidth, &windowsHeight);
-}
-void RenderedWindow::GetWindowDimensions(int &width, int &height){
-    width = windowsWidth;
-    height = windowsHeight;
-}
-int RenderedWindow::GetWindowWidth(){
-	return windowsWidth;
-}
-int RenderedWindow::GetWindowHeight(){
-	return windowsHeight;
-}
-
 SDL_Point GetSizeOfPNG(const char *path){
 	SDL_Point result = {0, 0};
 	std::ifstream png(path, std::ios::binary);
@@ -503,6 +469,51 @@ std::vector<SDL_Point> GetPointsInSegment(SDL_Point initialPoint, SDL_Point fina
 	return result;
 }
 
-bool operator==(const SDL_Point &point1, const SDL_Point &point2){
+bool ArePointsEqual(const SDL_Point &point1, const SDL_Point &point2){
 	return point1.x == point2.x && point1.y == point2.y;
+}
+
+bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, bool resetIfUnable){
+	//First we set the mouse original position
+	originalMousePosition.x = eventX;
+	originalMousePosition.y = eventY;
+
+	//Then we change the coordinates and check if it falls inside the window
+	eventX -= dimensions.x;
+	eventY -= dimensions.y;
+
+	if(eventX >= 0 && eventX < dimensions.w && eventY >= 0 && eventY < dimensions.h){
+		return false;
+	}
+
+	//If it doesn't we set the values back and return true, as it falls outside the rect
+	if(resetIfUnable){
+		eventX = originalMousePosition.x;
+		eventY = originalMousePosition.y;
+	}
+	return true;
+}
+
+bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, int *&pEventX, int *&pEventY, bool resetIfUnable){
+	//First we set the mouse original position and the pointers 
+	originalMousePosition.x = eventX;
+	originalMousePosition.y = eventY;
+	
+	pEventX = &eventX;
+	pEventY = &eventY;
+
+	//Then we change the coordinates and check if it falls inside the window
+	eventX -= dimensions.x;
+	eventY -= dimensions.y;
+	
+	if(eventX >= 0 && eventX < dimensions.w && eventY >= 0 && eventY < dimensions.h){
+		return false;
+	}
+
+	//If it doesn't we set the values back and return true, as it falls outside the rect
+	if(resetIfUnable){
+		eventX = originalMousePosition.x;
+		eventY = originalMousePosition.y;
+	}
+	return true;
 }

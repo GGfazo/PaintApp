@@ -9,15 +9,9 @@
 #include <algorithm>
 #include <optional>
 #include <cmath>
-
-//Destructors for smart pointers
-struct PointerDeleter{
-    void operator()(SDL_Window *pWindow) const{ SDL_DestroyWindow(pWindow); }
-    void operator()(SDL_Renderer *pRenderer) const{ SDL_DestroyRenderer(pRenderer); }
-    void operator()(SDL_Texture *pTexture) const{ SDL_DestroyTexture(pTexture); }
-    void operator()(SDL_Surface *pSurface) const{ SDL_FreeSurface(pSurface); }
-    void operator()(TTF_Font *pFont) const{ TTF_CloseFont(pFont); }
-};
+#include <variant>
+#include <unordered_map>
+#include <functional>
 
 //A class that holds and displays a given text. It can be moved and its dimensions can be resized
 class ConstantText{
@@ -297,249 +291,167 @@ class ChoicesArray{
     void UpdateTextures(SDL_Renderer *pRenderer);
 };
 
-class PositionPickerButton{
+struct OptionInfo{
+    enum class OptionIDs : int{
+        DRAWING_COLOR = 0,
+        HARD_OR_SOFT = 1,
+        PENCIL_RADIUS = 2,
+        PENCIL_HARDNESS = 3,
+        SOFT_ALPHA_CALCULATION = 4,
+        
+        CHOOSE_TOOL = 20,
+
+        ADD_LAYER = 50,
+        REMOVE_CURRENT_LAYER = 51,
+        SELECT_LAYER = 52,
+        
+        NEW_CANVAS_WIDTH = 100,
+        NEW_CANVAS_HEIGHT = 101,
+        NEW_CANVAS_CREATE = 102,
+
+        SAVING_NAME = 200,
+        PENCIL_DISPLAY_MAIN_COLOR = 201,
+        PENCIL_DISPLAY_ALTERNATE_COLOR = 202,
+        CANVAS_MOVEMENT_SPEED = 203,
+        CANVAS_MOVEMENT_FAST_SPEED = 204
+    };
+    enum class DataUsed{
+        NONE = 0,
+        TEXT = 1,
+        COLOR = 2,
+        REAL_VALUE = 3,
+        WHOLE_VALUE = 4,
+        TICK = 5
+    };
+    using data_t = std::variant<std::monostate, std::string, SDL_Color, float, int, bool>;
+
+    OptionIDs optionID; //Determines how the data should be handled
+
+    data_t data;
+    
+    struct GetDataVisitor {
+        template <typename T>
+        T operator()(const T& value) const {
+            return value;
+        }
+    };
+
+    OptionInfo() : optionID((OptionIDs)(-1)), data(std::monostate{}){}
+    
+    template <typename T> requires std::is_constructible_v<data_t, T>
+    OptionInfo(OptionIDs nOptionID, T nData) : optionID(nOptionID),  data(nData){}
+
+    template <typename T> requires std::is_constructible_v<data_t, T>
+    std::optional<T> GetData() const{
+        if(std::holds_alternative<T>(data)){
+            return std::get<T>(data);
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    bool IsInvalid(){return data.index() == static_cast<size_t>(DataUsed::NONE);}
+
+    static OptionInfo Invalid(){return OptionInfo();}
+
+    void SetTo(const OptionInfo& other){
+        optionID = other.optionID;
+        data = other.data;
+    }
+};
+
+class Option{
     public:
+    SDL_Point clickedPoint = {0,0};
+    enum class InputMethod{
+        TEXT_FIELD, //A text field for plain text, like a name
+        HEX_TEXT_FIELD, //A text field in hexadecimal holding a color
+        WHOLE_TEXT_FIELD, //A text field is used as input for numbers
+        SLIDER, //A slider that can hold a value in a given range
+        CHOICES_ARRAY, //An array of buttons to choose a preference (eg: tools)
+        TICK, //A button that either has the value true or false is used as input
+        ACTION //A button that performs an action when clicked
+    };
 
-    SDL_Rect dimensions;
-
-    PositionPickerButton(SDL_Texture *npTexture);
-
-    SDL_Point GetPositionPicked(bool *wasSelected);
+    Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo = "");
+    ~Option();
 
     bool HandleEvent(SDL_Event *event);
     void Draw(SDL_Renderer *pRenderer);
 
-    private:
+    void SetWidth(int nWidth);
+    void SetHeight(int nHeight);
+    void SetOptionText(const char *pNewText);
 
-    enum class PickingState{
-        NONE,
-        BUTTON_CLICKED,
-        POSITION_SELECTED
-    };
+    OptionInfo::OptionIDs GetOptionID();
 
-    PickingState mPickingState = PickingState::NONE;
-    SDL_Point mMouseClick;
-    std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
-};
+    void FetchInfo(std::string_view info);
 
-//We have to use floor, as just changing it into an int would drop the decimal place, making negative numbers erroneous
-inline SDL_Point GetPointCell(SDL_Point originalPoint, float cellSize){
-    return {(int)std::floor(originalPoint.x/cellSize), (int)std::floor(originalPoint.y/cellSize)};
-}
-
-struct Pencil{
-    //Determines general way to draw pixels
-    enum class PencilType{
-        HARD, //There's no transparency
-        SOFT  //The transparency of each pixel increases the farther they are from the center
-    };
-
-    //Determines how alpha values are calculated in soft pencils
-    enum class AlphaCalculation{
-        LINEAR = 0,     //The alpha value decreases linealy       (e.g: alpha = 1-distance/radius)
-        QUADRATIC,  //The alpha value decreases quadratically (e.g: alpha = 1-pow(distance/radius, 2))
-        EXPONENTIAL //The alpha value decreases exponentially (e.g: alpha = exp(e, -k*(distance/radius)), where k is a constant value)
-    };
-
-    //SetRadius calls UpdatePreviewRects
-    void SetRadius(int nRadius);
-    int GetRadius();
-
-    void SetHardness(float nHardness);
-    float GetHardness();
-    
-    void SetAlphaCalculation(AlphaCalculation nAlphaCalculation);
-    void SetPencilType(PencilType nPencilType);
-
-    //TODO: this is a temporal solution to still have an erase tool
-    SDL_Surface *GetCircleSurface();
-
-    //Applies the current pencil to the passed surface on the given centers
-    void ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea = nullptr);
-
-    //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
-    void SetResolution(float nResolution);
-
-    void DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE});
+    static void SetOptionsFont(std::shared_ptr<TTF_Font> npOptionsFont);
 
     private:
 
-    //Can have values in the range [1,oo), but is always 1 less than what it's returned in GetRadius and the value of 'nRadius' (if valid) in SetRadius
-	//Always set it to 1 less so that a radius set to 1 covers 1 pixel, while making it impossible to get returned a radius of 0
-    int mRadius = 1;
+    static std::shared_ptr<TTF_Font> mpOptionsFont;
 
-    //'mHardness' can have values in the range [0, 1]. Only has effect when 'mPencilType' is set to soft
-    //It determines the amount of pixels that get affected by the alpha change
-    float mHardness = 0.3f;
-
-    AlphaCalculation mAlphaCalculation = AlphaCalculation::LINEAR;
-    PencilType mPencilType = PencilType::SOFT;
-
-    //Holds the pixels that should be coloured with the current radius, and their alpha values
-    std::unique_ptr<SDL_Surface, PointerDeleter> mpCircleSurface;
-
-    //We use rects instead of stand alone pixels, not only for efficiency but also for better displaying
-	std::vector<SDL_Rect> mPreviewRects;
-    float mRectsResolution = 1.0f;
-
-    void UpdateCirclePixels();
-    Uint8 GetPixelAlpha(const SDL_Point &center, const SDL_Point &pixel);
-    void FillHorizontalLine(int y, int minX, int maxX, const SDL_Point &circleCenter, SDL_Surface *points);
-    void UpdatePreviewRects();
-};
-
-class MutableTexture{
-    public:
-
-    MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255, SDL_ALPHA_OPAQUE});
-    MutableTexture(SDL_Renderer *pRenderer, const char *pImage);
-
-    SDL_Color GetPixelColor(SDL_Point pixel, bool *validValue = nullptr);
-
-    void Clear(const SDL_Color &clearColor);
-
-    void ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor);
-
-    //SetPixel methods. Both SetDrawnPixels blend the alpha of the pixel instead of just setting it
-    void SetPixel(SDL_Point pixel, const SDL_Color &color);
-    void SetPixels(std::span<SDL_Point> pixels, const SDL_Color &color);
-    void SetPixelUnsafe(SDL_Point pixel, const SDL_Color &color);
-    void SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Color &color);
-    
-    SDL_Surface *GetCurrentSurface();
-
-    //Updates the texture, applying all the changes made since the last call. Must be called outside the class
-    void UpdateTexture();
-    void UpdateTexture(const SDL_Rect &rect);
-
-    void AddLayer(SDL_Renderer *pRenderer);
-    void DeleteCurrentLayer();
-    
-    //Sets the selected layer to the chosen one clamped between 0 and the amount of layers minus 1
-    void SetLayer(int nLayer);
-    int GetLayer();
-    int GetTotalLayers();
-
-    void DrawIntoRenderer(SDL_Renderer *pRenderer, const SDL_Rect &dimensions);
-
-    //Returns true if unable to save
-    bool Save(const char *pSavePath);
-
-    int GetWidth();
-    int GetHeight();
-
-    private:
-
-    int mSelectedLayer = 0;
-
-    //This is what actually gets drawn into the screen
-    std::vector<std::unique_ptr<SDL_Texture, PointerDeleter>> mTextures;
-
-    //This is what stores the pixel data
-    std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mSurfaces;
-
-    //Holds the position of all the pixels that have been modified since the last call to UpdateTexture
-    std::vector<SDL_Point> mChangedPixels;
-
-    //Used only in the constructor
-    void UpdateWholeTexture();
-
-    //Calculates the smallest rect that contains all points in 'mChangedPixels'
-    SDL_Rect GetChangesRect();
-
-    inline bool IsPixelOutsideImage(SDL_Point pixel){
-        return (std::clamp(pixel.x, 0, mSurfaces[mSelectedLayer]->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mSurfaces[mSelectedLayer]->h-1) != pixel.y);
-    }
-    inline Uint32* UnsafeGetPixel(SDL_Point index){
-        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[mSelectedLayer].get());
-    }
-    inline Uint32* UnsafeGetPixel(SDL_Point index, int layer){
-        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[layer].get());
-    }
-};
-
-//TODO: add an actual base class Tool, that has method to process a quantity of pixels. The Pencil class would inherit from it, as so would Eraser, ColorPicker, RangeSelection  
-class Canvas{
-    public:
-
-    enum class Tool{
-        DRAW_TOOL = 0,
-        ERASE_TOOL = 1
-    } usedTool = Tool::ERASE_TOOL;
-
-    Pencil pencil;
-    SDL_Color pencilDisplayMainColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
-    SDL_Color pencilDisplayAlternateColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
-
-    float defaultMovementSpeed = 50.0f;
-    float fastMovementSpeed = 150.0f;
-
-    bool saveOnDestroy = true;
-    SDL_Rect viewport;
-    //The color that the rest of the canvas (not the image) has, therefore it has no impact on the end result
-    SDL_Color backgroundColor = {120, 120, 120};
-
-    Canvas(SDL_Renderer *pRenderer, int nWidth, int nHeight);
-    Canvas(SDL_Renderer *pRenderer, const char *pLoadFile);
-
-    ~Canvas();
-
-    void Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight);
-    void OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile);
-
-    SDL_Color GetColor();
-    void SetColor(SDL_Color nDrawColor);
-
-    //Like SetPixel and SetPixels but it uses the pencil and changes the value of mLastMousePixel
-    void DrawPixel(SDL_Point localPixel);
-    void DrawPixels(const std::vector<SDL_Point> &localPixels);
-    void Clear(std::optional<SDL_Color> clearColor = {});
-
-    void SetSavePath(const char *nSavePath);
-    void SetOffset(int offsetX, int offsetY);
-    void SetResolution(float nResolution);
-
-    void HandleEvent(SDL_Event *event);
-
-    void Update(float deltaTime);
-
-    void DrawIntoRenderer(SDL_Renderer *pRenderer);
-
-    void Save();
-
-    void CenterInViewport();
-
-    int GetResolution();
-    SDL_Point GetImageSize();
-    SDL_Point GetGlobalPosition();
-    MutableTexture *GetImage();
-
-    private:
-
+    //It is private because, if resize is needed, we would also need to resize other components
     SDL_Rect mDimensions;
-    static constexpr float M_MIN_RESOLUTION = 0.01f, M_MAX_RESOLUTION = 100.0f;
-    float mResolution = 1;
-    std::unique_ptr<MutableTexture> mpImage;
 
-    //Every time it reaches 'M_MAX_TIMER', it saves the current image
-    static constexpr float M_MAX_TIMER = 30.0f; 
-    float mInternalTimer = 0.0f;
+    //Assigned in the constructor, it specifies which option is. It is only used in GetData() as the first 4 characters of the resulting string.
+    //The handling of the different IDs should be done outside the Option class
+    OptionInfo::OptionIDs mOptionID;
 
-    SDL_Color mDrawColor = {255, 0, 0, SDL_ALPHA_OPAQUE};
-    bool mHolded = false;
-    SDL_Point mLastMousePixel;
+    //Gets set to true when any relevant data gets changed and therefore should be applied (example, activating a button to change from pencil to eraser)
+    bool mModified = false;
 
-    enum Movement : unsigned int{
-        NONE =  0b0000,
-        LEFT =  0b0001,
-        RIGHT = 0b0010,
-        UP =    0b0100,
-        DOWN =  0b1000
-    };
-    unsigned int mCanvasMovement = Movement::NONE;
-    SDL_FPoint mRealPosition;
+    //Used to determine which member from the 'Input' union to use
+    InputMethod mInputMethod;
+
+    //This text displays next to the input to name the option
+    std::unique_ptr<ConstantText> mOptionText; 
+
+    //The width dedicated to the display of text
+    const int M_TEXT_WIDTH;
+
+    union Input{
+        TextField *mpTextField = nullptr;
+        Slider *mpSlider;
+        ChoicesArray *mpChoicesArray;
+        TickButton *mpTickButton;
+        ActionButton *mpActionButton;
+    } input;
+
+    //TODO probably change, I don't think we just want to use hard coded values
+    static constexpr int MIN_SPACE = 3;
+
+    OptionInfo *GetData();
+
+    void HandleInfo(std::string_view info);
+    void SetInputMethod(InputMethod nInputMethod);
     
-    std::string mSavePath;
+    //Class for the info handled
+    class OptionCommands{
+        public:
 
-    void UpdateRealPosition(){mRealPosition = {(float)mDimensions.x, (float)mDimensions.y};}
+        static void LoadCommands();
+        static void UnloadCommands();
+        
+        static void HandleCommand(Option *pOption, std::string_view command);
+
+        static void SetInitialValue(Option *pOption, std::string_view nValue);
+        static void SetOptionText(Option *pOption, std::string_view nOptionText);
+        static void SetMinValue(Option *pOption, std::string_view nMin);
+        static void SetMaxValue(Option *pOption, std::string_view nMax);
+        static void SetDecimalDigits(Option *pOption, std::string_view nDigits);
+        static void SetDefaultText(Option *pOption, std::string_view nDefaultText);
+        static void AddChoiceToArray(Option *pOption, std::string_view nTexturePath);
+        static void UnusableInfo(Option *pOption, std::string_view nUnusableInfo);
+
+        private:
+
+        using t_commands_map = std::unordered_map<std::string_view, std::function<void(Option*, std::string_view)>>;
+        static std::unique_ptr<t_commands_map> mCommandsMap;
+    };
+    
+    //TODO: eventually find a work around, so that 'options.hpp' does not need a direct reference to a class present in 'engineInternals.hpp' (which includes 'options.hpp')
+    friend class InternalWindow;
 };

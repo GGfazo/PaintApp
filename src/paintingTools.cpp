@@ -1,4 +1,4 @@
-#include "paintTools.hpp"
+#include "paintingTools.hpp"
 #include "renderLib.hpp"
 #include "logger.hpp"
 #include <iomanip>
@@ -6,694 +6,7 @@
 #include <algorithm>
 #include <future>
 
-void *TextInputManager::mRequester = nullptr;
-
-//CONSTANT TEXT METHODS:
-
-ConstantText::ConstantText(const char *pText, std::shared_ptr<TTF_Font> pFont){
-	Reset(pText, pFont);
-}
-
-void ConstantText::Reset(const char *pText, std::shared_ptr<TTF_Font> pFont){
-	mpFont = pFont;
-
-	TTF_SizeText(pFont.get(), pText, &mTextSize.x, &mTextSize.y);
-	
-	mpActualText = pText;
-	mUpdateText = true;
-}
-
-void ConstantText::SetX(int x){
-	mDimensions.x = x;
-}
-void ConstantText::SetY(int y){
-	mDimensions.y = y;
-}
-void ConstantText::SetWidth(int nWidth){
-	mDimensions.w = nWidth;
-	mDimensions.h = mTextSize.y*nWidth/mTextSize.x;
-}
-void ConstantText::SetHeight(int nHeight){
-	mDimensions.h = nHeight;
-	mDimensions.w = mTextSize.x*nHeight/mTextSize.y;
-}
-int ConstantText::GetWidth(){
-	return mDimensions.w;
-}
-SDL_Rect ConstantText::GetDimensions(){
-	return mDimensions;
-}
-
-void ConstantText::Draw(SDL_Renderer *pRenderer){
-	if(mUpdateText){
-		mpTextTexture.reset(LoadTextureFromText(mpActualText.c_str(), pRenderer, mpFont.get()));
-	}
-	SDL_RenderCopy(pRenderer, mpTextTexture.get(), nullptr, &mDimensions);
-}
-
-//TEXT FIELD METHODS:
-
-TextField::TextField(std::shared_ptr<TTF_Font> npFont, TextFormat nTextFormat, const std::string &nBlankText) : mpFont(npFont), mTextFormat(nTextFormat), mBlankText(nBlankText){}
-TextField::~TextField(){
-	TextInputManager::UnsetRequester(this);
-}
-
-void TextField::SetText(std::string_view nTextString){
-	std::string sanitizedString;
-	switch(mTextFormat){
-		case TextFormat::HEX:
-			//Sets 'mTextString' with all the digits from 'nTextString' that have a hexadecimal value and are part of the first 6 characters
-			sanitizedString = nTextString.substr(0, std::min(nTextString.find_first_not_of("0123456789abcdefABCDEF"), (size_t)6));
-
-			bool isValidData;
-			SDL_Color nTextColor = GetAsColor(sanitizedString, &isValidData);
-			if(isValidData) SetColor(nTextColor);
-
-			break;
-		case TextFormat::WHOLE_POSITIVE:
-			sanitizedString = nTextString.substr(0, nTextString.find_first_not_of("0123456789"));
-			break;
-
-		case TextFormat::NONE:
-			sanitizedString = nTextString;
-			break;
-	}
-
-	if(sanitizedString != mTextString){
-		mUpdateText = true;
-		mTextString = sanitizedString;
-	}
-
-	mCursor.SetPotition(std::clamp(mCursor.GetPosition(), 0, (int)mTextString.size()));
-}
-
-void TextField::AppendText(std::string_view toAppendText){
-	std::string resultingText = mTextString;
-	resultingText.insert(mCursor.GetPosition(), toAppendText);
-	
-	mCursor.IncreasePosition(0, INT_MAX, toAppendText.size());
-	SetText(resultingText);
-}
-
-void TextField::RemoveCharacters(int charactersAmount){
-	std::string resultingText = mTextString;
-	if(charactersAmount > mCursor.GetPosition()) charactersAmount = mCursor.GetPosition();
-	resultingText.erase(resultingText.begin()+(mCursor.GetPosition()-charactersAmount), resultingText.begin()+mCursor.GetPosition());
-
-	mCursor.DecreasePosition(0, mTextString.size(), charactersAmount);
-	SetText(resultingText);
-}
-
-void TextField::SetBlankText(std::string_view nBlankText){
-	mBlankText = nBlankText;
-
-	if(mTextString.empty()) mUpdateText = true;
-}
-
-void TextField::SetTextFormat(TextFormat nTextFormat){
-	mTextFormat = nTextFormat;
-}
-
-void TextField::SetColor(SDL_Color nTextColor){
-	mTextColor = nTextColor;
-}
-
-std::string_view TextField::GetText(){
-	return mTextString;
-}
-
-bool TextField::HasChanged(){
-	return mUpdateText;
-}
-
-bool TextField::HandleEvent(SDL_Event *event){
-
-	if(event->type == SDL_MOUSEBUTTONDOWN){
-		SDL_Point mousePos = {event->button.x, event->button.y};
-
-		if(SDL_PointInRect(&mousePos, &dimensions)){
-			mSelected = true;
-			TextInputManager::SetRequester(this);
-		} else {
-			mSelected = false;
-			TextInputManager::UnsetRequester(this);
-		}
-		return mSelected;
-
-	} else if(mSelected){
-		if(!TextInputManager::IsRequester(this)){
-			mSelected = false;
-			return false;
-		}
-
-		if (event->type == SDL_TEXTINPUT){
-
-			AppendText(event->text.text);
-
-        	return true;
-
-		} else if (event->type == SDL_KEYDOWN){
-			bool isControlPressed = SDL_GetModState() & KMOD_CTRL;
-			switch(event->key.keysym.sym){
-				case SDLK_LEFT: 
-					if(isControlPressed){
-						size_t index = mTextString.find_last_of(' ', mCursor.GetPosition()-2);
-						if(mCursor.GetPosition() < 2) index = -1;
-						mCursor.DecreasePosition(0, mTextString.size(), mCursor.GetPosition() - 1 - index);
-					} else {
-						mCursor.DecreasePosition(0, mTextString.size());
-					}
-					break;
-				case SDLK_RIGHT:
-					if(isControlPressed){
-						size_t index = mTextString.find_first_of(' ', mCursor.GetPosition()+1);
-						mCursor.IncreasePosition(0, mTextString.size(), ((index == std::string::npos) ? mTextString.size() : index) - mCursor.GetPosition());
-					} else {
-						mCursor.IncreasePosition(0, mTextString.size());
-					}
-					break;
-				case SDLK_BACKSPACE:
-					if(!mTextString.empty()){
-						if(isControlPressed){
-						size_t index = mTextString.find_last_of(' ', mCursor.GetPosition()-2);
-						if(mCursor.GetPosition() < 2) index = -1;
-							RemoveCharacters(mCursor.GetPosition() - 1 - index);
-						} else {
-							RemoveCharacters(1);
-						}
-					}
-					break;
-				case SDLK_v: 
-					if(isControlPressed){
-						char *pClipboardText = SDL_GetClipboardText();
-						AppendText(pClipboardText);
-						SDL_free(pClipboardText);
-					}
-					break;
-			}
-		}
-	}
-
-	return false;
-}
-
-void TextField::Update(float deltaTime){
-
-}
-
-void TextField::Draw(SDL_Renderer *pRenderer){
-	SDL_Rect cursorDimensions = {-1, -1, -1, -1};
-	if(mUpdateText){
-		if(!mTextString.empty()) mpTextTexture.reset(LoadTextureFromText(mTextString.c_str(), pRenderer, mpFont.get(), mTextColor));
-		//If the text is empty, it renders the blank text
-		else					 mpTextTexture.reset(LoadTextureFromText(mBlankText.c_str(), pRenderer, mpFont.get(), {150, 150, 150}));
-
-		mUpdateText = false; 
-	}
-	
-	//It doesn't make sense to keep rendering if the size is less or equal to 0
-	if(dimensions.w <= 0 || dimensions.h <= 0){
-		return;
-	}
-
-	int textW, textH; 
-
-	if(!mTextString.empty()) {
-		TTF_SizeUTF8(mpFont.get(), mTextString.c_str(), &textW, &textH);
-	} else {
-		TTF_SizeUTF8(mpFont.get(), mBlankText.c_str(), &textW, &textH);
-	}
-
-	if(displayBackground){
-		SDL_Color background = {215, 215, 215};
-		if(mTextColor.r + mTextColor.g + mTextColor.b > 382) background = {50, 50, 50};
-		
-		SDL_Rect displayRect = {(int)dimensions.x, (int)dimensions.y, (int)dimensions.w, (int)dimensions.h};
-		SDL_SetRenderDrawColor(pRenderer, background.r, background.g, background.b, SDL_ALPHA_OPAQUE);
-		SDL_RenderFillRect(pRenderer, &displayRect);
-
-		SDL_SetRenderDrawColor(pRenderer, background.r-50, background.g-50, background.b-50, SDL_ALPHA_OPAQUE);
-		SDL_RenderDrawRect(pRenderer, &displayRect);
-	}
-
-	const float TEXT_X_PADDING = dimensions.h/6.25f;
-	SDL_Rect textRect = {(int)TEXT_X_PADDING, 0, (textW*dimensions.h)/textH, dimensions.h};
-	
-	SDL_Rect previousViewport;
-	SDL_RenderGetViewport(pRenderer, &previousViewport);
-
-	SDL_Rect realDimensions = {(int)dimensions.x + previousViewport.x, (int)dimensions.y + previousViewport.y, (int)dimensions.w, (int)dimensions.h};
-
-	//First we check if the text is supposed to render (aka is inside the viewport)
-	if(SDL_Rect resultingDimensions; SDL_IntersectRect(&previousViewport, &realDimensions, &resultingDimensions) == SDL_TRUE){
-		SDL_RenderSetViewport(pRenderer, &resultingDimensions);
-		SDL_RenderCopy(pRenderer, mpTextTexture.get(), nullptr, &textRect);
-
-		//Easy way of removing the cursor on sliders, may be changed into the future (maybe by changing what sliders use to display value in text, maybe by letting them be interactable, maybe doesnby having its own bool)
-		if(displayBackground && mSelected){
-			mCursor.Draw(pRenderer, mTextColor, dimensions.h, mpFont.get(), mTextString);
-		}
-
-		SDL_RenderSetViewport(pRenderer, &previousViewport);
-	}
-}
-
-bool TextField::IsValidNumber(){
-	if(mTextString.empty()) return false;
-	switch (mTextFormat)
-	{
-		case TextFormat::HEX:
-			for(auto ch : mTextString){
-				if(!std::isxdigit(ch)){
-					return false;
-				}
-			}
-			break;	
-		case TextFormat::WHOLE_POSITIVE:
-			for(auto ch : mTextString){
-				if(!std::isdigit(ch)){
-					return false;
-				}
-			}
-			break;	
-		default:
-			ErrorPrint("text format uniable to generate number");
-			return false;
-	}
-	return true;
-}
-
-int TextField::GetAsNumber(bool *isValidData){
-	int rtNumber = 0;
-	
-	//No point on calling IsValidNumber() as it would require going trough the whole text twice
-	try{
-		switch (mTextFormat)
-		{
-			case TextFormat::HEX:
-				rtNumber = stoi(mTextString, nullptr, 16);
-				break;	
-			case TextFormat::WHOLE_POSITIVE:
-				rtNumber = stoi(mTextString);
-				break;	
-			default:
-				ErrorPrint("text format uniable to generate number");
-				if(isValidData) *isValidData = false;
-				return -1;
-		}
-		//at this point we can be sure it has been converted as no exceptions have been thrown
-		if(isValidData) *isValidData = true;
-	} catch(const std::invalid_argument &e){
-		//means that 'mTextString' cannot be converted into an int
-		DebugPrint("Cannot convert \"" + mTextString + "\" into an int");
-		if(isValidData) *isValidData = false;
-	} catch(const std::out_of_range &e){
-		//means that 'mTextString' is to big of a number to transform into an int
-		DebugPrint('\"' + mTextString + "\" overflows when turned into an int");
-		if(isValidData) *isValidData = false;
-	}
-
-	return rtNumber;
-}
-
-bool TextField::IsValidColor(){
-	return IsValidColor(mTextString);
-}
-
-SDL_Color TextField::GetAsColor(bool *isValidData){
-	return GetAsColor(mTextString, isValidData);
-}
-
-bool TextField::IsValidColor(std::string text){
-	if(text.size() != 6){
-		return false;
-	}
-
-	//Should always be true, as the format cannot be changed and is set to hex
-	for(const auto& digit : text){
-		if(!std::isxdigit(digit)){
-			return false;
-		}
-	}
-
-	return true;
-}
-
-SDL_Color TextField::GetAsColor(std::string text, bool *isValidData){
-	SDL_Color rtColor {0, 0, 0, SDL_ALPHA_OPAQUE};
-	bool isHex = IsValidColor(text);
-	
-	if(isHex){
-		rtColor.r = std::stoul(text.substr(0, 2), nullptr, 16);
-		rtColor.g = std::stoul(text.substr(2, 2), nullptr, 16);
-		rtColor.b = std::stoul(text.substr(4, 2), nullptr, 16);
-	}
-
-	//We check if 'isValidData' is not a nullptr, and set it to the value of 'isHex'
-	if(isValidData) *isValidData = isHex;
-
-	return rtColor;
-}
-
-//TEXTFIELD CURSOR METHODS
-
-TextField::Cursor::Cursor(int nPosition) : mPosition(nPosition){}
-            
-void TextField::Cursor::SetPotition(int nPosition){
-	mPosition = nPosition;
-}
-
-int TextField::Cursor::GetPosition(){
-	return mPosition;
-}
-
-void TextField::Cursor::DecreasePosition(int minPosition, int maxPosition, int amount){
-	mPosition -= amount;
-	if(mPosition < minPosition || mPosition > maxPosition){
-		mPosition = minPosition;
-	}
-}
-
-void TextField::Cursor::IncreasePosition(int minPosition, int maxPosition, int amount){
-	mPosition += amount;
-	if(mPosition < minPosition || mPosition > maxPosition){
-		mPosition = maxPosition;
-	}
-}
-
-void TextField::Cursor::Draw(SDL_Renderer* pRenderer, SDL_Color cursorColor, int height, TTF_Font *pFont, const std::string& text){
-	//May change into the future, making it a parametter or a constexpr function
-	const int TEXT_X_PADDING = height/6.25f;
-
-	SDL_Rect cursorDimensions = {TEXT_X_PADDING, 0, 2, height};
-
-	if(!text.empty()) {
-		int textW, textH;
-		TTF_SizeUTF8(pFont, text.substr(0, mPosition).c_str(), &textW, &textH);
-		cursorDimensions.x += (textW*height)/textH;
-	}
-
-	//We don't use the alpha value because it aready has no effect on the text
-	SDL_SetRenderDrawColor(pRenderer, cursorColor.r, cursorColor.g, cursorColor.b, SDL_ALPHA_OPAQUE);
-	SDL_RenderFillRect(pRenderer, &cursorDimensions);
-}
-
-//ACTION BUTTON METHODS:
-
-ActionButton::ActionButton(SDL_Rect nDimensions) : dimensions(nDimensions){}
-
-bool ActionButton::HandleEvent(SDL_Event *event){
-	if(event->type == SDL_MOUSEBUTTONDOWN){
-		SDL_Point mousePos = {event->button.x, event->button.y};
-
-		if(SDL_PointInRect(&mousePos, &dimensions)){
-			mDrawColor = HOLDED_COLOR;
-			return true;
-		}
-	} else if (event->type == SDL_MOUSEBUTTONUP){
-		mDrawColor = IDLE_COLOR;
-	}
-	return false;
-}
-
-void ActionButton::Draw(SDL_Renderer *pRenderer){
-	SDL_SetRenderDrawColor(pRenderer, mDrawColor.r, mDrawColor.g, mDrawColor.b, SDL_ALPHA_OPAQUE);
-	SDL_RenderFillRect(pRenderer, &dimensions);
-	SDL_SetRenderDrawColor(pRenderer, 120, 120, 120, SDL_ALPHA_OPAQUE);
-	SDL_RenderDrawRect(pRenderer, &dimensions);
-}
-
-//TICK BUTTON METHODS:
-
-TickButton::TickButton(SDL_Rect nDimensions, bool nValue) : dimensions(nDimensions), mValue(nValue){}
-
-bool TickButton::HandleEvent(SDL_Event *event){
-	if(event->type == SDL_MOUSEBUTTONDOWN){
-		SDL_Point mousePos = {event->button.x, event->button.y};
-
-		if(SDL_PointInRect(&mousePos, &dimensions)){
-			mValue = !mValue;
-			return true;
-		}
-	}
-	return false;
-}
-
-void TickButton::Draw(SDL_Renderer *pRenderer){
-	Uint8 innerBright = 255*(mValue?1:0);
-
-	SDL_SetRenderDrawColor(pRenderer, innerBright, innerBright, innerBright, SDL_ALPHA_OPAQUE);
-	SDL_RenderFillRect(pRenderer, &dimensions);
-	SDL_SetRenderDrawColor(pRenderer, 127, 127, 127, SDL_ALPHA_OPAQUE);
-	SDL_RenderDrawRect(pRenderer, &dimensions);
-}
-
-void TickButton::SetValue(bool nValue){
-	mValue = nValue;
-}
-
-bool TickButton::GetValue(){
-	return mValue;
-}
-
-//SLIDER METHODS:
-
-Slider::Slider(std::shared_ptr<TTF_Font> npFont, SDL_Rect nDimensions, float initialValue, float nMin, float nMax) :
-	mTextField(npFont, TextField::TextFormat::NONE, "ERROR"), mDimensions(nDimensions), mFilledDimensions(nDimensions), mMin(nMin), mMax(nMax){
-	
-	mTextField.dimensions = mDimensions;
-	mTextField.displayBackground = false;
-	mTextField.SetColor({255, 255, 255});
-	
-	SetValue(initialValue);
-}
-
-void Slider::SetWidth(int nWidth){
-	mDimensions.w = nWidth;
-	if(mMax != mMin) mFilledDimensions.w = (int)(mDimensions.w * (mValue-mMin)/(mMax-mMin));
-	else mFilledDimensions.w = mDimensions.w;
-	mTextField.dimensions.w = mDimensions.w;
-}
-
-void Slider::SetDimensions(SDL_Rect nDimensions){
-	mDimensions = nDimensions;
-	mFilledDimensions = nDimensions;
-	if(mMax != mMin) mFilledDimensions.w = (int)(mDimensions.w * (mValue-mMin)/(mMax-mMin));
-	else mFilledDimensions.w = mDimensions.w;
-	mTextField.dimensions = mDimensions;
-}
-
-SDL_Rect Slider::GetDimensions(){
-	return mDimensions;
-}
-
-void Slider::SetValue(float nValue, bool mustUpdate){
-	//We adjusti it so that it only conserves the most important digits
-	nValue = std::round(std::pow(10, mDecimalPlaces)*std::clamp(nValue, mMin, mMax))*std::pow(0.1f, mDecimalPlaces);
-
-	//Then we check if the value has changed in any way
-	mHasChanged = (mValue != nValue);
-	if(!mHasChanged && !mustUpdate){
-		return;
-	}
-	mValue = nValue;
-
-	//We set the filled dimensions width
-	if(mMax != mMin) mFilledDimensions.w = (int)(mDimensions.w * (nValue-mMin)/(mMax-mMin));
-	else mFilledDimensions.w = mDimensions.w;
-
-	//We transform the value into a string and finally we get only the part we want (all digits except the decimal places that we do not want)
-	//Even if before we set mValue's precision, the float still holds those decimal values (either as 0s or 9s), so we still have to truncate them
-	std::string textValue;
-	if(mDecimalPlaces > 0) {
-		textValue = std::to_string(mValue);
-		mTextField.SetText(textValue.substr(0, textValue.find('.')+(mDecimalPlaces+1)));
-	}
-	else{ 
-		textValue = std::to_string((int)mValue);
-		mTextField.SetText(textValue);
-	}
-}
-
-void Slider::SetMinValue(float nMin){
-	mMin = nMin;
-	
-	//We make sure the value is clamped + recalculate dimensions and text
-	SetValue(mValue, true);
-}
-void Slider::SetMaxValue(float nMax){
-	mMax = nMax;
-
-	//We make sure the value is clamped + recalculate dimensions and text
-	SetValue(mValue, true);
-}
-
-void Slider::SetDecimalPlaces(int nDecimalPlaces){
-	mDecimalPlaces = nDecimalPlaces;
-	
-	//We make sure the value is adjuste + recalculate (dimensions and) text
-	SetValue(mValue, true);
-}
-
-float Slider::GetValue(){
-	return mValue;
-}
-
-bool Slider::HasChanged(){
-	return mHasChanged;
-}
-
-bool Slider::HandleEvent(SDL_Event *event){
-	if(event->type == SDL_MOUSEBUTTONDOWN){
-		SDL_Point mousePos = {event->button.x, event->button.y};
-
-		if(SDL_PointInRect(&mousePos, &mDimensions)){
-			SetValue((mMax-mMin)*((mousePos.x-mDimensions.x)/(float)mDimensions.w)+mMin);
-			mSelected = true;
-		}
-	} else if(event->type == SDL_MOUSEWHEEL){
-		SetValue(mValue + event->wheel.y*std::pow(0.1f, mDecimalPlaces));
-		return true;
-	}
-	else if(mSelected){
-		if(event->type == SDL_MOUSEMOTION){
-			if(event->motion.x < mDimensions.x){
-				//We check for mValue being equal to mMin as it is faster than the method used in SetValue to verify it has changed
-				if(mValue != mMin) SetValue(mMin);
-			}
-			else if (event->motion.x > mDimensions.x+mDimensions.w){
-				//We check for mValue being equal to mMax as it is faster than the method used in SetValue to verify it has changed
-				if(mValue != mMax) SetValue(mMax);
-			}
-			else {
-				SetValue((mMax-mMin)*((event->motion.x-mDimensions.x)/(float)mDimensions.w)+mMin);
-			}
-		}
-		else if(event->type == SDL_MOUSEBUTTONUP){
-			mSelected = false;
-		}
-	}
-
-	return mSelected;
-}
-
-void Slider::Draw(SDL_Renderer *pRenderer){
-	FillRect(pRenderer, mDimensions, 20, 20, 20);
-	FillRect(pRenderer, mFilledDimensions, 200, 100, 60);
-
-	//Make a viewport with the dimensions, so that the textfield appears clipped instead of outside the slider
-	SDL_Rect previousViewport = {-1, -1, -1, -1};
-	SDL_RenderGetViewport(pRenderer, &previousViewport);
-	SDL_Rect newViewport = {previousViewport.x, previousViewport.y, std::min(mDimensions.x+mDimensions.w, previousViewport.w), previousViewport.h};
-	
-	SDL_RenderSetViewport(pRenderer, &newViewport);
-
-	mTextField.Draw(pRenderer);
-
-	SDL_RenderSetViewport(pRenderer, &previousViewport);
-}
-
-//CHOICES_ARRAY METHODS:
-
-ChoicesArray::ChoicesArray(SDL_Rect nDimensions, int nButtonsSize) : mDimensions(nDimensions), mButtonsSize(nButtonsSize){}
-
-void ChoicesArray::AddOption(std::string texturePath){
-	mTexturesPaths.push_back(texturePath);
-	mUpdateTextures = true;
-}
-
-void ChoicesArray::SetDimensions(SDL_Rect nDimensions){
-	mDimensions = nDimensions;
-}
-
-SDL_Rect ChoicesArray::GetDimensions(){
-	return mDimensions;
-}
-
-bool ChoicesArray::SetLastChosenOption(int nLastChosen){
-	if(nLastChosen >= mTextures.size()){
-		return true;
-	}
-
-	//We check that mLastChosen was valid in order to set the texture back to its original color mod
-	if(mLastChosen < mTextures.size()){
-		//We set the previously chosen to its original color
-		SDL_SetTextureColorMod(mTextures[mLastChosen].get(), 255, 255, 255);
-	}
-	
-	//We make the currently selected a bit darker
-	SDL_SetTextureColorMod(mTextures[nLastChosen].get(), 180, 180, 180);
-	
-	mLastChosen = nLastChosen;
-	
-	return false;
-}
-
-int ChoicesArray::GetLastChosenOption(){
-	return mLastChosen;
-}
-
-void ChoicesArray::UncheckedSetLastChosenOption(int nLastChosen){
-	mLastChosen = nLastChosen;
-}
-
-bool ChoicesArray::HandleEvent(SDL_Event *event){
-	if(event->type == SDL_MOUSEBUTTONDOWN){
-		SDL_Point mousePos = {event->button.x, event->button.y};
-
-		SDL_Rect buttonSpace = {mDimensions.x, mDimensions.y , mButtonsSize*(int)floor(mDimensions.w/(float)mButtonsSize), mButtonsSize*(int)ceil(mDimensions.h/(float)mButtonsSize)};
-
-		if(SDL_PointInRect(&mousePos, &buttonSpace)){
-
-			//We calculate the index of the button in the clicked space
-			int deltaX = (mousePos.x - buttonSpace.x) / mButtonsSize;
-			int deltaY = (mousePos.y - buttonSpace.y) / mButtonsSize;
-			int newChosen = deltaY * floor(mDimensions.w/mButtonsSize) + deltaX;
-			
-			//If there was no error with the new choice, aka a new choice was set, we return true
-			return !SetLastChosenOption(newChosen);
-		}
-	}
-	return false;
-}
-
-void ChoicesArray::Draw(SDL_Renderer *pRenderer){
-	if(mUpdateTextures){
-		UpdateTextures(pRenderer);
-	}
-
-	SDL_Rect buttonRect = {mDimensions.x, mDimensions.y, mButtonsSize, mButtonsSize};
-
-	for(const auto &texture : mTextures){
-		SDL_RenderCopy(pRenderer, texture.get(), nullptr, &buttonRect);
-		
-		buttonRect.x += mButtonsSize;
-		if(buttonRect.x + mButtonsSize > mDimensions.x + mDimensions.w){
-			buttonRect.x = mDimensions.x;
-			buttonRect.y += mButtonsSize;
-
-			if(buttonRect.y >= mDimensions.y + mDimensions.h){
-				//As the button wouldn't display, we break out of the loop
-				break;
-			}
-		}
-	}
-}
-
-void ChoicesArray::UpdateTextures(SDL_Renderer *pRenderer){
-	mTextures.resize(mTexturesPaths.size());
-	for(int i = 0; i < mTexturesPaths.size(); ++i){
-		mTextures[i].reset(LoadTexture(mTexturesPaths[i].c_str(), pRenderer));
-	}
-
-	mTexturesPaths.clear();
-	mUpdateTextures = false;
-	
-	//We call this function to update the colouring of the selected texture that was just resseted
-	SetLastChosenOption(mLastChosen);
-}
-
-//POSITION PICKER BUTTON METHODS:
+/*POSITION PICKER BUTTON METHODS:
 
 PositionPickerButton::PositionPickerButton(SDL_Texture *npTexture) : mpTexture(npTexture){}
 
@@ -726,7 +39,7 @@ bool PositionPickerButton::HandleEvent(SDL_Event *event){
 }
 void PositionPickerButton::Draw(SDL_Renderer *pRenderer){
     SDL_RenderCopy(pRenderer, mpTexture.get(), nullptr, &dimensions);
-}
+}*/
 
 //PENCIL METHODS:
 
@@ -767,22 +80,69 @@ void Pencil::SetPencilType(PencilType nPencilType){
 	mPencilType = nPencilType;
 	UpdateCirclePixels();
 }
- 
-SDL_Surface *Pencil::GetCircleSurface(){
-	return mpCircleSurface.get();
-}
 
 void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea){
 	int smallestX = INT_MAX, biggestX = INT_MIN, smallestY = INT_MAX, biggestY = INT_MIN;
+	bool changeWasApplied = false;
+
+	//std::unique_ptr<SDL_Renderer, PointerDeleter> pRenderer(SDL_CreateSoftwareRenderer(pSurfaceToModify));
 
 	for(const auto &center : circleCenters){
-		SDL_Rect drawArea = {center.x - mRadius, center.y - mRadius, 0, 0}; // We do not use '2*mRadius+1' for width or height since it is not used by SDL_BlitSurface
+		SDL_Rect drawArea = {center.x - mRadius, center.y - mRadius, 2*mRadius+1, 2*mRadius+1};
 		
-		SDL_SetSurfaceColorMod(mpCircleSurface.get(), circleColor.r, circleColor.g, circleColor.b);
-		SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), circleColor.a);
+		// Create a renderer
+		SDL_Renderer* renderer = SDL_CreateSoftwareRenderer(pSurfaceToModify);
 
-		SDL_BlitSurface(mpCircleSurface.get(), nullptr, pSurfaceToModify, &drawArea);
+		// Create a texture from the circle surface
+		SDL_Texture* circleTexture = SDL_CreateTextureFromSurface(renderer, mpCircleSurface.get());
 
+		// Set the blend mode for the texture
+		SDL_SetTextureBlendMode(circleTexture, SDL_BLENDMODE_BLEND);
+
+		// Set the color modulation for the texture (if needed)
+		SDL_SetTextureColorMod(circleTexture, circleColor.r, circleColor.g, circleColor.b);
+
+		// Set the alpha modulation for the texture (if needed)
+		SDL_SetTextureAlphaMod(circleTexture, circleColor.a);
+		
+		// Render the circle texture with blending
+		SDL_RenderCopy(renderer, circleTexture, nullptr, &drawArea);
+
+		// Update the screen
+		SDL_RenderPresent(renderer);
+
+		// Clean up resources
+		SDL_DestroyTexture(circleTexture);
+		SDL_DestroyRenderer(renderer);
+
+		/*
+		SDL_Rect givenArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h},  usedArea = {0,0,0,0};
+		if(SDL_IntersectRect(&givenArea, &drawArea, &usedArea) == SDL_FALSE) continue;
+		SDL_Point circleOffset = {usedArea.x-drawArea.x, usedArea.y-drawArea.y};
+		
+		float appliedAlpha = (circleColor.a/255.0f), apR = circleColor.r/255.0f, apG = circleColor.g/255.0f, apB = circleColor.b/255.0f;
+		*/
+
+
+		/*for(int y = 0; y < usedArea.h; ++y){
+			for(int x = 0; x < usedArea.w; ++x){
+				Uint32 *baseColor = UnsafeGetPixelFromSurface<Uint32>({x+usedArea.x, y+usedArea.y}, pSurfaceToModify);
+				SDL_Color actualColor = {0, 0, 0, 0};
+				SDL_GetRGBA(*baseColor, pSurfaceToModify->format, &actualColor.r, &actualColor.g, &actualColor.b, &actualColor.a);
+				Uint8 *appliedColor = UnsafeGetPixelFromSurface<Uint8>({x+circleOffset.x, y+circleOffset.y}, mpCircleSurface.get());
+				float bsA = actualColor.a/255.0f, bsR = actualColor.r/255.0f, bsG = actualColor.g/255.0f, bsB = actualColor.b/255.0f;
+				float apA = appliedAlpha**(appliedColor)/255.0f, resultA = apA+bsA*(1-apA);
+				*baseColor = SDL_MapRGBA(pSurfaceToModify->format, SDL_ALPHA_OPAQUE*((apR*apA+bsR*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*((apG*apA+bsG*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*((apB*apA+bsB*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*(resultA));
+				*baseColor = SDL_MapRGBA(pSurfaceToModify->format, circleColor.r, circleColor.g, circleColor.b, 255);
+			}
+		}*/
+
+		//SDL_SetSurfaceColorMod(mpCircleSurface.get(), circleColor.r, circleColor.g, circleColor.b);
+		//SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), circleColor.a);
+		//SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BLENDMODE_BLEND);
+		//SDL_BlitSurface(mpCircleSurface.get(), nullptr, pSurfaceToModify, &drawArea);
+        
+		changeWasApplied = true;
 		if(smallestX > center.x) smallestX = center.x;
 		if(biggestX < center.x) biggestX = center.x;
 		if(smallestY > center.y) smallestY = center.y;
@@ -793,9 +153,13 @@ void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleC
 	SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), SDL_ALPHA_OPAQUE);
 
 	if(pTotalUsedArea != nullptr){
-		SDL_Rect actualArea = {smallestX - mRadius, smallestY - mRadius, (biggestX-smallestX) + 2*mRadius+1, (biggestY-smallestY) + 2*mRadius+1};
-		SDL_Rect surfaceArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h};
-		SDL_IntersectRect(&actualArea, &surfaceArea, pTotalUsedArea);
+		if(changeWasApplied){
+			SDL_Rect actualArea = {smallestX - mRadius, smallestY - mRadius, (biggestX-smallestX) + 2*mRadius+1, (biggestY-smallestY) + 2*mRadius+1};
+			SDL_Rect surfaceArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h};
+			SDL_IntersectRect(&actualArea, &surfaceArea, pTotalUsedArea);
+		} else {
+			*pTotalUsedArea = {0, 0, 0, 0};
+		}
 	}
 }
 
@@ -811,8 +175,8 @@ void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 
 	for(int i = 0; i < mPreviewRects.size(); ++i){
 		rects[i] = mPreviewRects[i];
-		rects[i].x += center.x;
-		rects[i].y += center.y;
+		rects[i].x += center.x-((int)roundf(mRectsResolution))/2;
+		rects[i].y += center.y-((int)roundf(mRectsResolution))/2;
 	}
 	
 	SDL_RenderFillRects(pRenderer, rects, mPreviewRects.size());
@@ -823,8 +187,8 @@ void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 void Pencil::UpdateCirclePixels(){
 	mpCircleSurface.reset(SDL_CreateRGBSurfaceWithFormat(0, 2*mRadius+1, 2*mRadius+1, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
 	SDL_Rect surfaceRect {0, 0, mpCircleSurface->w, mpCircleSurface->h};
-	SDL_FillRect(mpCircleSurface.get(), &surfaceRect, SDL_MapRGBA(mpCircleSurface->format, 255, 255, 255, 0));
-	SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BlendMode::SDL_BLENDMODE_BLEND);
+	SDL_FillRect(mpCircleSurface.get(), &surfaceRect, 0);
+	SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BLENDMODE_BLEND);
 
 	//(mRadius, mRadius) is the middle pixel for the surface
 	const SDL_Point center = {mRadius, mRadius};
@@ -931,7 +295,7 @@ void Pencil::UpdatePreviewRects(){
 	mPreviewRects.reserve(mRadius*2);
 
 	//The method we use to round the coordinates, currently it seems like ceil produces the best looking results (aka with less gaps)
-	const std::function<float(float)> ROUND = ceilf;
+	const std::function<float(float)> ROUND = roundf;
 
 	auto addRects = [&center, &resolution, &ROUND](std::vector<SDL_Rect> &mPreviewRects, int rectLength, SDL_Rect &auxiliar){
 		mPreviewRects.emplace_back(center.x + (int)ROUND(resolution * auxiliar.x),                    center.y + (int)ROUND(resolution * auxiliar.y),                    (int)ROUND(resolution * auxiliar.w), (int)ROUND(resolution * auxiliar.h));
@@ -1278,7 +642,6 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 	mpImage->UpdateTexture(usedArea);
 
 	mLastMousePixel = localPixel;
-
 }
 
 void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
@@ -1316,8 +679,8 @@ void Canvas::SetResolution(float nResolution){
 
 	int nWidth = mpImage->GetWidth()*mResolution, nHeight = mpImage->GetHeight()*mResolution;
 
-	mRealPosition.x = viewport.w/2 - (viewport.w/2-(mRealPosition.x+viewport.x)) * nWidth * 1.0f / mDimensions.w;
-	mRealPosition.y = viewport.h/2 - (viewport.h/2-(mRealPosition.y+viewport.y)) * nHeight * 1.0f / mDimensions.h;
+	mRealPosition.x = viewport.w/2 - (viewport.w/2-(mRealPosition.x)) * nWidth * 1.0f / mDimensions.w;
+	mRealPosition.y = viewport.h/2 - (viewport.h/2-(mRealPosition.y)) * nHeight * 1.0f / mDimensions.h;
 	mDimensions.x = (int)(mRealPosition.x);
 	mDimensions.y = (int)(mRealPosition.y);
 	mDimensions.w = nWidth;
@@ -1365,7 +728,7 @@ void Canvas::HandleEvent(SDL_Event *event){
 
 	
 		//Check the pixel wasn't the last one modified
-		if(mLastMousePixel == pixel) return;
+		if(ArePointsEqual(mLastMousePixel, pixel)) return;
 		
 		//If the last pixel where the mouse was registered and the current pixel are separated by more than 1 unit in any axis, we also set the pixels in between
 		if(std::abs(pixel.x-mLastMousePixel.x) > 1 || std::abs(pixel.y-mLastMousePixel.y) > 1){
@@ -1481,35 +844,34 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		SDL_RenderFillRect(pRenderer, &imageShade);
 	}
 
-	SDL_Rect intersectionRect;
-	if(SDL_IntersectRect(&mDimensions, &viewport, &intersectionRect) == SDL_FALSE) intersectionRect = mDimensions;
+	SDL_Rect intersectionRect = {mDimensions.x + viewport.x, mDimensions.y + viewport.y, std::min(mDimensions.w, viewport.w), std::min(mDimensions.h, viewport.h)};
 	SDL_RenderSetViewport(pRenderer, &intersectionRect);
-	for(int maxSquares = 10, squareX = 0; squareX < maxSquares; squareX++){
-		int squareWidth = ceil(mDimensions.w*1.0f/maxSquares);
-		SDL_Rect squareRect = {squareX * squareWidth + mDimensions.x - intersectionRect.x, + mDimensions.y - intersectionRect.y, squareWidth, squareWidth};
-		for(int maxY = ceil(maxSquares*mDimensions.h*1.0f/mDimensions.w), squareY = 0; squareY < maxY; squareY++){
+
+    const int MAX_X_SQUARES = 10, MAX_Y_SQUARES = ceil(MAX_X_SQUARES*mDimensions.h*1.0f/mDimensions.w), SQUARE_SIZE = ceil(mDimensions.w*1.0f/MAX_X_SQUARES);
+
+	for(int squareX = 0; squareX < MAX_X_SQUARES; squareX++){
+		SDL_Rect squareRect = {squareX * SQUARE_SIZE, 0, SQUARE_SIZE, SQUARE_SIZE};
+		for(int squareY = 0; squareY < MAX_Y_SQUARES; squareY++){
 			Uint8 squareColor = ((squareX+squareY) % 2 == 0)?205:155;
 
 			SDL_SetRenderDrawColor(pRenderer, squareColor, squareColor, squareColor, SDL_ALPHA_OPAQUE);
 			SDL_RenderFillRect(pRenderer, &squareRect);
 
-			squareRect.y += squareWidth;
+			squareRect.y += SQUARE_SIZE;
 		}
 	}
-	SDL_RenderSetViewport(pRenderer, &viewport);
 
+	SDL_RenderSetViewport(pRenderer, &viewport);
 	mpImage->DrawIntoRenderer(pRenderer, mDimensions);
 
 	if(!mHolded || pencil.GetRadius() > 4){
 		SDL_Point mousePosition;
 		SDL_GetMouseState(&mousePosition.x, &mousePosition.y);
 
-		SDL_Rect intersectionRect;
-		if(SDL_IntersectRect(&mDimensions, &viewport, &intersectionRect) == SDL_FALSE) intersectionRect = mDimensions;
 		SDL_RenderSetViewport(pRenderer, &intersectionRect);
 
 		//We find the middle pixel
-		SDL_Point pixel = GetPointCell({mousePosition.x-(mDimensions.x), mousePosition.y-(mDimensions.y)}, mResolution);
+		SDL_Point pixel = GetPointCell({mousePosition.x-mDimensions.x, mousePosition.y-mDimensions.y}, mResolution);
 		
 		SDL_Color previewColor = pencilDisplayMainColor;
 		bool validColor = true;
@@ -1517,11 +879,16 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		if(validColor && ((int)pixelColor.r + (int)pixelColor.g + (int)pixelColor.b)*(pixelColor.a/255.0f) <= 127.0f*3){
 			previewColor = pencilDisplayAlternateColor;
 		}
-		
+
+        /*
+        We would perform these operations in order to then send pixel to Pencil::DrawPreview. This has been discarded as it wouldn't result in a pixel perfect preview 	
 		pixel.x *= mResolution; pixel.y *= mResolution;
 		pixel.x -= intersectionRect.x-mDimensions.x; pixel.y -= intersectionRect.y-mDimensions.y;
-		
-		pencil.DrawPreview(pixel, pRenderer, previewColor);
+		*/
+
+		//We find the middle pixel
+		SDL_Point mouseToCanvas = {mousePosition.x-(mDimensions.x+viewport.x), mousePosition.y-(mDimensions.y+viewport.y)};
+		pencil.DrawPreview(mouseToCanvas, pRenderer, previewColor);
 	}
 
 	SDL_RenderSetViewport(pRenderer, nullptr);

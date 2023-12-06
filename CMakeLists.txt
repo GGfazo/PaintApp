@@ -10,8 +10,10 @@ add_library(
 filesToAdd
 src/engineInternals.cpp
 src/engineInternals.hpp
-src/paintTools.cpp
-src/paintTools.hpp
+src/options.cpp
+src/options.hpp
+src/paintingTools.cpp
+src/paintingTools.hpp
 src/logger.cpp
 src/logger.hpp
 src/renderLib.cpp

@@ -6,22 +6,13 @@
 #include <string>
 #include <vector>
 
-class RenderedWindow{
-    int windowsWidth;
-    int windowsHeight;
-
-    public:
-    
-    SDL_Window* pWindow;
-    SDL_Renderer* pRenderer;
-
-    //RenderedWindow() = default;
-    RenderedWindow(int width, int height, Uint32 flags = 0, const char* windowsName = "Default name", int x = SDL_WINDOWPOS_UNDEFINED, int y = SDL_WINDOWPOS_UNDEFINED);
-    ~RenderedWindow();
-    void UpdateInternalDimensions();
-    void GetWindowDimensions(int &width, int &height);
-    int GetWindowWidth();
-    int GetWindowHeight();
+//Destructors for smart pointers
+struct PointerDeleter{
+    void operator()(SDL_Window *pWindow) const{ SDL_DestroyWindow(pWindow); }
+    void operator()(SDL_Renderer *pRenderer) const{ SDL_DestroyRenderer(pRenderer); }
+    void operator()(SDL_Texture *pTexture) const{ SDL_DestroyTexture(pTexture); }
+    void operator()(SDL_Surface *pSurface) const{ SDL_FreeSurface(pSurface); }
+    void operator()(TTF_Font *pFont) const{ TTF_CloseFont(pFont); }
 };
 
 enum class Format
@@ -150,7 +141,16 @@ bool FRectOutsideFRect(SDL_FRect &rect1, SDL_FRect &rect2);
 std::vector<SDL_Point> GetPointsInSegment(SDL_Point initialPoint, SDL_Point finalPoint); 
 
 //Returns true only if both x values and y values are equal (e.g. (10,12) == (10,12) => true)
-bool operator==(const SDL_Point &point1, const SDL_Point &point2);
+bool ArePointsEqual(const SDL_Point &point1, const SDL_Point &point2);
+
+//Converts the event x and y values to a value relative to the dimensions passed, saving the original position to a point parameter
+//Returns true if the event x or y values are outside the dimensions rect. In that case, they don't get changed
+bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, bool resetIfUnable = true);
+
+//Converts the event x and y values to a value relative to the dimensions passed, saving the original position to a point parameter
+//Returns true if the event x or y values are outside the dimensions rect. In that case, they don't get changed
+//It sets pEventX and pEventY to the location of eventX and eventY (so that the process can be undone)
+bool MakeEventRelativeToRect(const SDL_Rect &dimensions, int &eventX, int &eventY, SDL_Point &originalMousePosition, int *&pEventX, int *&pEventY, bool resetIfUnable = true);
 
 inline bool IsRectCompletelyInsideRect(const SDL_Rect &contained, const SDL_Rect &mainRect){
     return (mainRect.x <= contained.x) && (mainRect.y <= contained.y) &&
