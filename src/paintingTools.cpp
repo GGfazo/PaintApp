@@ -81,66 +81,55 @@ void Pencil::SetPencilType(PencilType nPencilType){
 	UpdateCirclePixels();
 }
 
-void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea){
+void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color drawColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea){
 	int smallestX = INT_MAX, biggestX = INT_MIN, smallestY = INT_MAX, biggestY = INT_MIN;
 	bool changeWasApplied = false;
 
-	//std::unique_ptr<SDL_Renderer, PointerDeleter> pRenderer(SDL_CreateSoftwareRenderer(pSurfaceToModify));
+	//TODO: In the future, find a way to apply shaders (to make soft pencil faster). Currently it's preferred to use the hard pencil type for big radii
 
 	for(const auto &center : circleCenters){
 		SDL_Rect drawArea = {center.x - mRadius, center.y - mRadius, 2*mRadius+1, 2*mRadius+1};
-		
-		// Create a renderer
-		SDL_Renderer* renderer = SDL_CreateSoftwareRenderer(pSurfaceToModify);
+		if(mPencilType == PencilType::HARD){
+			
+			SDL_SetSurfaceColorMod(mpCircleSurface.get(), drawColor.r, drawColor.g, drawColor.b);
+			SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), drawColor.a);
+			SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BLENDMODE_BLEND);
+			SDL_BlitSurface(mpCircleSurface.get(), nullptr, pSurfaceToModify, &drawArea);
+			/* 
+			SDL_Renderer* renderer = SDL_CreateSoftwareRenderer(pSurfaceToModify);
+			SDL_Texture* circleTexture = SDL_CreateTextureFromSurface(renderer, mpCircleSurface.get());
+			SDL_SetTextureBlendMode(circleTexture, SDL_BLENDMODE_BLEND);
+			SDL_SetTextureColorMod(circleTexture, drawColor.r, drawColor.g, drawColor.b);
+			SDL_SetTextureAlphaMod(circleTexture, drawColor.a);
+			SDL_RenderCopy(renderer, circleTexture, nullptr, &drawArea);
+			SDL_RenderPresent(renderer);
+			SDL_DestroyTexture(circleTexture);
+			SDL_DestroyRenderer(renderer)
+			*/
+		} else {
 
-		// Create a texture from the circle surface
-		SDL_Texture* circleTexture = SDL_CreateTextureFromSurface(renderer, mpCircleSurface.get());
+			SDL_Rect givenArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h},  usedArea = {0,0,0,0};
+			if(SDL_IntersectRect(&givenArea, &drawArea, &usedArea) == SDL_FALSE) continue;
+			SDL_Point circleOffset = {usedArea.x-drawArea.x, usedArea.y-drawArea.y};
+			
+			float appliedAlpha = (drawColor.a/255.0f);
+			FColor appliedColor = {.r = drawColor.r/255.0f, .g = drawColor.g/255.0f, .b = drawColor.b/255.0f, .a = 0};
 
-		// Set the blend mode for the texture
-		SDL_SetTextureBlendMode(circleTexture, SDL_BLENDMODE_BLEND);
-
-		// Set the color modulation for the texture (if needed)
-		SDL_SetTextureColorMod(circleTexture, circleColor.r, circleColor.g, circleColor.b);
-
-		// Set the alpha modulation for the texture (if needed)
-		SDL_SetTextureAlphaMod(circleTexture, circleColor.a);
-		
-		// Render the circle texture with blending
-		SDL_RenderCopy(renderer, circleTexture, nullptr, &drawArea);
-
-		// Update the screen
-		SDL_RenderPresent(renderer);
-
-		// Clean up resources
-		SDL_DestroyTexture(circleTexture);
-		SDL_DestroyRenderer(renderer);
-
-		/*
-		SDL_Rect givenArea = {0, 0, pSurfaceToModify->w, pSurfaceToModify->h},  usedArea = {0,0,0,0};
-		if(SDL_IntersectRect(&givenArea, &drawArea, &usedArea) == SDL_FALSE) continue;
-		SDL_Point circleOffset = {usedArea.x-drawArea.x, usedArea.y-drawArea.y};
-		
-		float appliedAlpha = (circleColor.a/255.0f), apR = circleColor.r/255.0f, apG = circleColor.g/255.0f, apB = circleColor.b/255.0f;
-		*/
-
-
-		/*for(int y = 0; y < usedArea.h; ++y){
-			for(int x = 0; x < usedArea.w; ++x){
-				Uint32 *baseColor = UnsafeGetPixelFromSurface<Uint32>({x+usedArea.x, y+usedArea.y}, pSurfaceToModify);
-				SDL_Color actualColor = {0, 0, 0, 0};
-				SDL_GetRGBA(*baseColor, pSurfaceToModify->format, &actualColor.r, &actualColor.g, &actualColor.b, &actualColor.a);
-				Uint8 *appliedColor = UnsafeGetPixelFromSurface<Uint8>({x+circleOffset.x, y+circleOffset.y}, mpCircleSurface.get());
-				float bsA = actualColor.a/255.0f, bsR = actualColor.r/255.0f, bsG = actualColor.g/255.0f, bsB = actualColor.b/255.0f;
-				float apA = appliedAlpha**(appliedColor)/255.0f, resultA = apA+bsA*(1-apA);
-				*baseColor = SDL_MapRGBA(pSurfaceToModify->format, SDL_ALPHA_OPAQUE*((apR*apA+bsR*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*((apG*apA+bsG*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*((apB*apA+bsB*bsA*(1-apA))/resultA), SDL_ALPHA_OPAQUE*(resultA));
-				*baseColor = SDL_MapRGBA(pSurfaceToModify->format, circleColor.r, circleColor.g, circleColor.b, 255);
+			for(int y = 0; y < usedArea.h; ++y){
+				for(int x = 0; x < usedArea.w; ++x){
+					Uint32 *basePixel = UnsafeGetPixelFromSurface<Uint32>({x+usedArea.x, y+usedArea.y}, pSurfaceToModify);
+					SDL_Color actualColor = {0, 0, 0, 0};
+					SDL_GetRGBA(*basePixel, pSurfaceToModify->format, &actualColor.r, &actualColor.g, &actualColor.b, &actualColor.a);
+					Uint32 *circlePixel = UnsafeGetPixelFromSurface<Uint32>({x+circleOffset.x, y+circleOffset.y}, mpCircleSurface.get());
+					SDL_Color circleColor; SDL_GetRGBA(*circlePixel, mpCircleSurface->format, &circleColor.r, &circleColor.g, &circleColor.b, &circleColor.a); //We only care about the alpha
+					
+					FColor baseColor = {.r = actualColor.r/255.0f, .g = actualColor.g/255.0f, .b = actualColor.b/255.0f, .a = actualColor.a/255.0f};
+					appliedColor.a = (appliedAlpha*circleColor.a)/255.0f;
+					MutableTexture::ApplyColorToColor(baseColor, appliedColor);
+					*basePixel = SDL_MapRGBA(pSurfaceToModify->format, SDL_ALPHA_OPAQUE*baseColor.r, SDL_ALPHA_OPAQUE*baseColor.g, SDL_ALPHA_OPAQUE*baseColor.b, SDL_ALPHA_OPAQUE*baseColor.a);
+				}
 			}
-		}*/
-
-		//SDL_SetSurfaceColorMod(mpCircleSurface.get(), circleColor.r, circleColor.g, circleColor.b);
-		//SDL_SetSurfaceAlphaMod(mpCircleSurface.get(), circleColor.a);
-		//SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BLENDMODE_BLEND);
-		//SDL_BlitSurface(mpCircleSurface.get(), nullptr, pSurfaceToModify, &drawArea);
+		}
         
 		changeWasApplied = true;
 		if(smallestX > center.x) smallestX = center.x;
@@ -396,24 +385,23 @@ void MutableTexture::Clear(const SDL_Color &clearColor){
 }
 
 void MutableTexture::ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor){
-	/*
-	The following may be added if shown to improve speed in cases
-	if(appliedColor.a == 255){
-		baseColor.a = appliedColor.a;
-		baseColor.r = appliedColor.r;
-		baseColor.g = appliedColor.g;
-		baseColor.b = appliedColor.b;
-		return;
-	}
-	*/
+	FColor base {.r = baseColor.r/255.0f, .g = baseColor.g/255.0f, .b = baseColor.b/255.0f, .a = baseColor.a/255.0f};
+	FColor applied{.r = appliedColor.r/255.0f, .g = appliedColor.g/255.0f, .b = appliedColor.b/255.0f, .a = appliedColor.a/255.0f};
 
-	float bsA = baseColor.a/255.0f, bsR = baseColor.r/255.0f, bsG = baseColor.g/255.0f, bsB = baseColor.b/255.0f;
-	float apA = appliedColor.a/255.0f, apR = appliedColor.r/255.0f, apG = appliedColor.g/255.0f, apB = appliedColor.b/255.0f;
-	float resultA = apA+bsA*(1-apA);
-	baseColor.a = SDL_ALPHA_OPAQUE*(resultA);
-	baseColor.r = SDL_ALPHA_OPAQUE*((apR*apA+bsR*bsA*(1-apA))/resultA);
-	baseColor.g = SDL_ALPHA_OPAQUE*((apG*apA+bsG*bsA*(1-apA))/resultA);
-	baseColor.b = SDL_ALPHA_OPAQUE*((apB*apA+bsB*bsA*(1-apA))/resultA);
+	ApplyColorToColor(base, applied);
+
+	baseColor.r = SDL_ALPHA_OPAQUE*(base.r);
+	baseColor.g = SDL_ALPHA_OPAQUE*(base.g);
+	baseColor.b = SDL_ALPHA_OPAQUE*(base.b);
+	baseColor.a = SDL_ALPHA_OPAQUE*(base.a);
+}
+
+void MutableTexture::ApplyColorToColor(FColor &baseColor, const FColor &appliedColor){
+	float resultA = appliedColor.a+baseColor.a*(1-appliedColor.a);
+	baseColor.a = resultA;
+	baseColor.r = (appliedColor.r*appliedColor.a+baseColor.r*baseColor.a*(1-appliedColor.a))/resultA;
+	baseColor.g = (appliedColor.g*appliedColor.a+baseColor.g*baseColor.a*(1-appliedColor.a))/resultA;
+	baseColor.b = (appliedColor.b*appliedColor.a+baseColor.b*baseColor.a*(1-appliedColor.a))/resultA;
 
 	/*
 	//The following procedure comes from https://en.wikipedia.org/wiki/Alpha_compositing gamma correction:
@@ -639,7 +627,10 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 
 	std::vector<SDL_Point> pixels{localPixel};
 	pencil.ApplyOn(pixels, mDrawColor, mpImage->GetCurrentSurface(), &usedArea);
-	mpImage->UpdateTexture(usedArea);
+
+	if(usedArea.w != 0){ //Theoretically if width is 0, height should also be 0, so no need to check
+		mpImage->UpdateTexture(usedArea);
+	}
 
 	mLastMousePixel = localPixel;
 }
@@ -649,7 +640,10 @@ void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
 	
 	std::vector<SDL_Point> pixels(localPixels);
 	pencil.ApplyOn(pixels, mDrawColor, mpImage->GetCurrentSurface(), &usedArea);
-	mpImage->UpdateTexture(usedArea);
+	
+	if(usedArea.w != 0){ //Theoretically if width is 0, height should also be 0, so no need to check
+		mpImage->UpdateTexture(usedArea);
+	}
 
     mLastMousePixel = localPixels.back();
 }

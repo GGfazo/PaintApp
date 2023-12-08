@@ -65,7 +65,7 @@ struct Pencil{
     void SetPencilType(PencilType nPencilType);
 
     //Applies the current pencil to the passed surface on the given centers
-    void ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color circleColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea = nullptr);
+    void ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color drawColor, SDL_Surface *pSurfaceToModify, SDL_Rect *pTotalUsedArea = nullptr);
 
     //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
     void SetResolution(float nResolution);
@@ -108,7 +108,8 @@ class MutableTexture{
 
     void Clear(const SDL_Color &clearColor);
 
-    void ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor);
+    static void ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor);
+    static void ApplyColorToColor(FColor &baseColor, const FColor &appliedColor);
 
     //SetPixel methods. Both SetDrawnPixels blend the alpha of the pixel instead of just setting it
     void SetPixel(SDL_Point pixel, const SDL_Color &color);

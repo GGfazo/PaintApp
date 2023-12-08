@@ -2,7 +2,11 @@
 SDL2/
 SDL2_image/
 SDL2_ttf/
+SDL2_gpu/
 
 #Info (structure + TODOs):
 AppPlans/
-src/.vscode/
+.vscode/
+
+*.vert
+*.frag

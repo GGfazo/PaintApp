@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+struct FColor{
+    float r, g, b, a;
+};
+
 //Destructors for smart pointers
 struct PointerDeleter{
     void operator()(SDL_Window *pWindow) const{ SDL_DestroyWindow(pWindow); }
