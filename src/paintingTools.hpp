@@ -117,6 +117,7 @@ class MutableTexture{
     void SetPixelUnsafe(SDL_Point pixel, const SDL_Color &color);
     void SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Color &color);
     
+    //If the surface is modified, the texture won't be modified unless specified with a call to 'UpdateTexture' with a specified rect
     SDL_Surface *GetCurrentSurface();
 
     //Updates the texture, applying all the changes made since the last call. Must be called outside the class
@@ -143,11 +144,11 @@ class MutableTexture{
 
     int mSelectedLayer = 0;
 
-    //This is what actually gets drawn into the screen
-    std::vector<std::unique_ptr<SDL_Texture, PointerDeleter>> mTextures;
-
     //This is what stores the pixel data
-    std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mSurfaces;
+    std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mpSurfaces;
+
+    //Formed by the compound of surfaces. It's what gets drawn into the screen
+    std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
 
     //Holds the position of all the pixels that have been modified since the last call to UpdateTexture
     std::vector<SDL_Point> mChangedPixels;
@@ -159,13 +160,13 @@ class MutableTexture{
     SDL_Rect GetChangesRect();
 
     inline bool IsPixelOutsideImage(SDL_Point pixel){
-        return (std::clamp(pixel.x, 0, mSurfaces[mSelectedLayer]->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mSurfaces[mSelectedLayer]->h-1) != pixel.y);
+        return (std::clamp(pixel.x, 0, mpSurfaces[mSelectedLayer]->w-1) != pixel.x) || (std::clamp(pixel.y, 0, mpSurfaces[mSelectedLayer]->h-1) != pixel.y);
     }
     inline Uint32* UnsafeGetPixel(SDL_Point index){
-        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[mSelectedLayer].get());
+        return UnsafeGetPixelFromSurface<Uint32>(index, mpSurfaces[mSelectedLayer].get());
     }
     inline Uint32* UnsafeGetPixel(SDL_Point index, int layer){
-        return UnsafeGetPixelFromSurface<Uint32>(index, mSurfaces[layer].get());
+        return UnsafeGetPixelFromSurface<Uint32>(index, mpSurfaces[layer].get());
     }
 };
 
@@ -251,6 +252,23 @@ class Canvas{
     SDL_FPoint mRealPosition;
     
     std::string mSavePath;
+
+    //Holds data used during the display of the canvas, so that it doesn't have to be calculated each time 'DrawIntoRenderer' is called
+    //Should be updated each time 'mDimensions' changes
+    struct DisplayingHolder{
+        DisplayingHolder(Canvas *npOwner);
+        void Update();
+
+        static constexpr int MAX_BORDER = 20;
+        SDL_Rect backgroundRects[4] {{-1,-1,-1,-1}, {-1,-1,-1,-1}, {-1,-1,-1,-1}, {-1,-1,-1,-1}};
+
+        std::vector<SDL_Rect> lightGreySquares{}, darkGreySquares{};
+        const SDL_Color grey[2] = {SDL_Color{205, 205, 205}, SDL_Color{155, 155, 155}};
+
+        private:
+
+        Canvas *mpOwner;
+    } mDisplayingHolder;
 
     void UpdateRealPosition(){mRealPosition = {(float)mDimensions.x, (float)mDimensions.y};}
 };

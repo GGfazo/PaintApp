@@ -174,7 +174,7 @@ void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 }
 
 void Pencil::UpdateCirclePixels(){
-	mpCircleSurface.reset(SDL_CreateRGBSurfaceWithFormat(0, 2*mRadius+1, 2*mRadius+1, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
+	mpCircleSurface.reset(SDL_CreateRGBSurfaceWithFormat(0, 2*mRadius+1, 2*mRadius+1, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
 	SDL_Rect surfaceRect {0, 0, mpCircleSurface->w, mpCircleSurface->h};
 	SDL_FillRect(mpCircleSurface.get(), &surfaceRect, 0);
 	SDL_SetSurfaceBlendMode(mpCircleSurface.get(), SDL_BLENDMODE_BLEND);
@@ -335,10 +335,10 @@ void Pencil::UpdatePreviewRects(){
 //MUTABLE TEXTURE METHODS:
 
 MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor){
-	mSurfaces.resize(1);
-	mTextures.resize(1);
-	mSurfaces[mSelectedLayer].reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
-    mTextures[mSelectedLayer].reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width, height));
+	mpSurfaces.resize(1);
+	mpSurfaces[mSelectedLayer].reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
+    mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width, height));
+	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
 
 	Clear(fillColor);
 }
@@ -346,11 +346,11 @@ MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, S
 MutableTexture::MutableTexture(SDL_Renderer *pRenderer, const char *pImage){
 	SDL_Surface *loaded = IMG_Load(pImage);
 	
-	mSurfaces.resize(1);
-	mTextures.resize(1);
-	mSurfaces[mSelectedLayer].reset(SDL_ConvertSurfaceFormat(loaded, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, 0));
-    mTextures[mSelectedLayer].reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, loaded->w, loaded->h));
-	
+	mpSurfaces.resize(1);
+	mpSurfaces[mSelectedLayer].reset(SDL_ConvertSurfaceFormat(loaded, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, 0));
+    mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, loaded->w, loaded->h));
+	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
+
     SDL_FreeSurface(loaded);
 	
 	UpdateWholeTexture();
@@ -368,9 +368,9 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
 	SDL_Color pixelColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
 	
 	//We calculate the end displayed color
-	for(int i = 0; i < mSurfaces.size(); ++i){
+	for(int i = 0; i < mpSurfaces.size(); ++i){
 		SDL_Color auxiliar;
-		SDL_GetRGBA(*UnsafeGetPixel(pixel, i), mSurfaces[i]->format, &auxiliar.r, &auxiliar.g, &auxiliar.b, &auxiliar.a);
+		SDL_GetRGBA(*UnsafeGetPixel(pixel, i), mpSurfaces[i]->format, &auxiliar.r, &auxiliar.g, &auxiliar.b, &auxiliar.a);
 		ApplyColorToColor(pixelColor, auxiliar);
 	}
 	return pixelColor;
@@ -378,8 +378,7 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
 
 void MutableTexture::Clear(const SDL_Color &clearColor){
 	//Currently only clears the current layer
-	SDL_Rect surfaceRect {0, 0, mSurfaces[mSelectedLayer]->w, mSurfaces[mSelectedLayer]->h};
-	SDL_FillRect(mSurfaces[mSelectedLayer].get(), &surfaceRect, SDL_MapRGBA(mSurfaces[mSelectedLayer]->format, clearColor.r, clearColor.g, clearColor.b, clearColor.a));
+	SDL_FillRect(mpSurfaces[mSelectedLayer].get(), nullptr, SDL_MapRGBA(mpSurfaces[mSelectedLayer]->format, clearColor.r, clearColor.g, clearColor.b, clearColor.a));
 
 	UpdateWholeTexture();
 }
@@ -398,10 +397,10 @@ void MutableTexture::ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &ap
 
 void MutableTexture::ApplyColorToColor(FColor &baseColor, const FColor &appliedColor){
 	float resultA = appliedColor.a+baseColor.a*(1-appliedColor.a);
-	baseColor.a = resultA;
 	baseColor.r = (appliedColor.r*appliedColor.a+baseColor.r*baseColor.a*(1-appliedColor.a))/resultA;
 	baseColor.g = (appliedColor.g*appliedColor.a+baseColor.g*baseColor.a*(1-appliedColor.a))/resultA;
 	baseColor.b = (appliedColor.b*appliedColor.a+baseColor.b*baseColor.a*(1-appliedColor.a))/resultA;
+	baseColor.a = resultA; //Important that the alpha is set at the end, since it's used in the calculations
 
 	/*
 	//The following procedure comes from https://en.wikipedia.org/wiki/Alpha_compositing gamma correction:
@@ -431,21 +430,21 @@ void MutableTexture::SetPixels(std::span<SDL_Point> pixels, const SDL_Color &col
 }
 
 void MutableTexture::SetPixelUnsafe(SDL_Point pixel, const SDL_Color &color){
-	*UnsafeGetPixel(pixel) = SDL_MapRGBA(mSurfaces[mSelectedLayer]->format, color.r, color.g, color.b, color.a);
+	*UnsafeGetPixel(pixel) = SDL_MapRGBA(mpSurfaces[mSelectedLayer]->format, color.r, color.g, color.b, color.a);
 
 	mChangedPixels.push_back(pixel);
 }
 
 void MutableTexture::SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Color &color){
 	for(const auto &pixel : pixels){
-		*UnsafeGetPixel(pixel) = SDL_MapRGBA(mSurfaces[mSelectedLayer]->format, color.r, color.g, color.b, color.a);
+		*UnsafeGetPixel(pixel) = SDL_MapRGBA(mpSurfaces[mSelectedLayer]->format, color.r, color.g, color.b, color.a);
 	}
 
 	mChangedPixels.insert(mChangedPixels.end(), pixels.begin(), pixels.end());
 }
 
 SDL_Surface *MutableTexture::GetCurrentSurface(){
-	return mSurfaces[mSelectedLayer].get();
+	return mpSurfaces[mSelectedLayer].get();
 }
 
 void MutableTexture::UpdateTexture(){
@@ -464,43 +463,44 @@ void MutableTexture::UpdateTexture(const SDL_Rect &rect){
 
 	SDL_Surface *texturesSurface;
 
-	SDL_LockTextureToSurface(mTextures[mSelectedLayer].get(), &rect, &texturesSurface);
+	SDL_LockTextureToSurface(mpTexture.get(), &rect, &texturesSurface);
 	
-	SDL_SetSurfaceBlendMode(mSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_NONE);
-	SDL_BlitSurface(mSurfaces[mSelectedLayer].get(), &rect, texturesSurface, nullptr);
-	SDL_SetSurfaceBlendMode(mSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
+	SDL_FillRect(texturesSurface, nullptr, SDL_MapRGBA(texturesSurface->format, 255, 255, 255, SDL_ALPHA_TRANSPARENT));
+	for(const auto& surface : mpSurfaces){
+		SDL_BlitSurface(surface.get(), &rect, texturesSurface, nullptr);
+	}
 	
-	SDL_UnlockTexture(mTextures[mSelectedLayer].get());
+	SDL_UnlockTexture(mpTexture.get());
 }
 
 void MutableTexture::AddLayer(SDL_Renderer *pRenderer){
-	mSurfaces.emplace(mSurfaces.begin()+mSelectedLayer+1, SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
-    mTextures.emplace(mTextures.begin()+mSelectedLayer+1, SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, GetWidth(), GetHeight()));
-	mSelectedLayer++;
+	mpSurfaces.emplace(mpSurfaces.begin()+mSelectedLayer+1, SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
+    mSelectedLayer++;
 
-	SDL_SetSurfaceBlendMode(mSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
-	SDL_SetTextureBlendMode(mTextures[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
+	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	
 	//Currently all new layers are created with no colors
 	Clear({255, 255, 255, SDL_ALPHA_TRANSPARENT});
+	UpdateWholeTexture();
 }
 
 void MutableTexture::DeleteCurrentLayer(){
-	if(mSurfaces.size() == 1){
+	if(mpSurfaces.size() == 1){
 		DebugPrint("Can't delete current layer, as it is the last one left");
 		return;
 	}
 
-	//Better be careful than sorry
-	mSelectedLayer = std::clamp(mSelectedLayer, 0, (int)mSurfaces.size()-1);
+	//Better safe than sorry
+	mSelectedLayer = std::clamp(mSelectedLayer, 0, (int)mpSurfaces.size()-1);
 
-	mSurfaces.erase(mSurfaces.begin() + mSelectedLayer);
-	mTextures.erase(mTextures.begin() + mSelectedLayer);
+	mpSurfaces.erase(mpSurfaces.begin() + mSelectedLayer);
+	
+	UpdateWholeTexture();
 	if(mSelectedLayer != 0) mSelectedLayer--;
 }
 
 void MutableTexture::SetLayer(int nLayer){
-	nLayer = std::clamp(nLayer, 0, (int)mSurfaces.size()-1);
+	nLayer = std::clamp(nLayer, 0, (int)mpSurfaces.size()-1);
 	mSelectedLayer = nLayer;
 }
 
@@ -509,21 +509,22 @@ int MutableTexture::GetLayer(){
 }
 
 int MutableTexture::GetTotalLayers(){
-	return mSurfaces.size();
+	return mpSurfaces.size();
 }
 
 void MutableTexture::DrawIntoRenderer(SDL_Renderer *pRenderer, const SDL_Rect &dimensions){
-	for(const auto& texture : mTextures) SDL_RenderCopy(pRenderer, texture.get(), nullptr, &dimensions);
+	SDL_RenderCopy(pRenderer, mpTexture.get(), nullptr, &dimensions);
 }
 
 bool MutableTexture::Save(const char *pSavePath){
-	std::unique_ptr<SDL_Surface, PointerDeleter> saveSurface(SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888));
+	std::unique_ptr<SDL_Surface, PointerDeleter> pSaveSurface(SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
+	SDL_FillRect(pSaveSurface.get(), nullptr, SDL_MapRGBA(pSaveSurface->format, 255, 255, 255, SDL_ALPHA_TRANSPARENT));
 
-	for(const auto& surface : mSurfaces){
-		SDL_BlitSurface(surface.get(), nullptr, saveSurface.get(), nullptr);
+	for(const auto& surface : mpSurfaces){
+		SDL_BlitSurface(surface.get(), nullptr, pSaveSurface.get(), nullptr);
 	}
 
-	if(IMG_SavePNG(saveSurface.get(), pSavePath)){
+	if(IMG_SavePNG(pSaveSurface.get(), pSavePath)){
 		ErrorPrint("Couldn't save image in file "+std::string(pSavePath));
 		return true;
 	}
@@ -531,28 +532,15 @@ bool MutableTexture::Save(const char *pSavePath){
 }
 
 int MutableTexture::GetWidth(){
-	return mSurfaces[0]->w;
+	return mpSurfaces[0]->w;
 }
 
 int MutableTexture::GetHeight(){
-	return mSurfaces[0]->h;
+	return mpSurfaces[0]->h;
 }
 
 void MutableTexture::UpdateWholeTexture(){
-	SDL_Surface *texturesSurface;
-
-	for(int i = 0; i < mSurfaces.size(); ++i){
-		SDL_LockTextureToSurface(mTextures[i].get(), nullptr, &texturesSurface);
-		
-		//Makes sure that the texture gets updated with the exact info (no blending involved)
-		SDL_SetSurfaceBlendMode(mSurfaces[i].get(), SDL_BLENDMODE_NONE);
-		SDL_BlitSurface(mSurfaces[i].get(), nullptr, texturesSurface, nullptr);
-		SDL_SetSurfaceBlendMode(mSurfaces[i].get(), SDL_BLENDMODE_BLEND);
-
-		SDL_UnlockTexture(mTextures[i].get());
-
-		SDL_SetTextureBlendMode(mTextures[i].get(), SDL_BLENDMODE_BLEND);
-	}
+	UpdateTexture({0, 0, GetWidth(), GetHeight()});
 	
 	mChangedPixels.clear();
 }
@@ -586,15 +574,15 @@ SDL_Rect MutableTexture::GetChangesRect(){
 
 //SURFACE CANVAS METHODS:
 
-Canvas::Canvas(SDL_Renderer *pRenderer, int nWidth, int nHeight) : 
-	mpImage(new MutableTexture(pRenderer, nWidth, nHeight)){
-
+Canvas::Canvas(SDL_Renderer *pRenderer, int nWidth, int nHeight) : mpImage(new MutableTexture(pRenderer, nWidth, nHeight)), mDisplayingHolder(this){
 	mDimensions = {0, 0, nWidth, nHeight};
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
-Canvas::Canvas(SDL_Renderer *pRenderer, const char *pLoadFile) : mpImage(new MutableTexture(pRenderer, pLoadFile)){
+Canvas::Canvas(SDL_Renderer *pRenderer, const char *pLoadFile) : mpImage(new MutableTexture(pRenderer, pLoadFile)), mDisplayingHolder(this){
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
@@ -605,12 +593,14 @@ Canvas::~Canvas(){
 void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 	mpImage.reset(new MutableTexture(pRenderer, nWidth, nHeight));
 	mDimensions = {0, 0, nWidth, nHeight};
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
 void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
 	mpImage.reset(new MutableTexture(pRenderer, pLoadFile));
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
@@ -663,6 +653,7 @@ void Canvas::SetSavePath(const char *nSavePath){
 void Canvas::SetOffset(int offsetX, int offsetY){
 	mDimensions.x = offsetX;
 	mDimensions.y = offsetY;
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
@@ -679,6 +670,7 @@ void Canvas::SetResolution(float nResolution){
 	mDimensions.y = (int)(mRealPosition.y);
 	mDimensions.w = nWidth;
 	mDimensions.h = nHeight;
+	mDisplayingHolder.Update();
 }
 
 void Canvas::HandleEvent(SDL_Event *event){
@@ -817,43 +809,36 @@ void Canvas::Update(float deltaTime){
 
 		mDimensions.x = (int)mRealPosition.x;
 		mDimensions.y = (int)mRealPosition.y;
+		mDisplayingHolder.Update();
 	}
 }
 
 void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
-	SDL_SetRenderDrawColor(pRenderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, SDL_ALPHA_OPAQUE);
-	SDL_RenderFillRect(pRenderer, &viewport);
-
 	SDL_RenderSetViewport(pRenderer, &viewport);
 	
-	//Gives a shade to the image, so it is easily distinguishable from the background, works better with birght colors
-	for(int maxBorder = 20, border = maxBorder; border >= 1; --border){
-		SDL_Rect imageShade = {mDimensions.x - 2*border, mDimensions.y - 2*border, mDimensions.w + 4*border, mDimensions.h + 4*border};
+	//Gives a shade to the image, so it is easily distinguishable from the background, works better with birght colors.
+	//This isn't handled by the 'DisplayingHolder' since the backgroundColor (at least for now) is constantly changing
+	for(int border = 1; border <= DisplayingHolder::MAX_BORDER; border++){
+		SDL_Rect imageShade = {mDimensions.x - border, mDimensions.y - border, mDimensions.w + 2*border, mDimensions.h + 2*border};
 
-		SDL_Color shadeColor = {(Uint8)(backgroundColor.r*border/(float)maxBorder),
-								(Uint8)(backgroundColor.g*border/(float)maxBorder), 
-								(Uint8)(backgroundColor.b*border/(float)maxBorder)};
+		SDL_Color shadeColor = {(Uint8)(backgroundColor.r*border/(float)DisplayingHolder::MAX_BORDER),
+								(Uint8)(backgroundColor.g*border/(float)DisplayingHolder::MAX_BORDER), 
+								(Uint8)(backgroundColor.b*border/(float)DisplayingHolder::MAX_BORDER)};
 
 		SDL_SetRenderDrawColor(pRenderer, shadeColor.r, shadeColor.g, shadeColor.b, SDL_ALPHA_OPAQUE);
-		SDL_RenderFillRect(pRenderer, &imageShade);
+		SDL_RenderDrawRect(pRenderer, &imageShade);
 	}
+
+	SDL_SetRenderDrawColor(pRenderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRects(pRenderer, mDisplayingHolder.backgroundRects, 4);
 
 	SDL_Rect intersectionRect = {mDimensions.x + viewport.x, mDimensions.y + viewport.y, std::min(mDimensions.w, viewport.w), std::min(mDimensions.h, viewport.h)};
 	SDL_RenderSetViewport(pRenderer, &intersectionRect);
 
-    const int MAX_X_SQUARES = 10, MAX_Y_SQUARES = ceil(MAX_X_SQUARES*mDimensions.h*1.0f/mDimensions.w), SQUARE_SIZE = ceil(mDimensions.w*1.0f/MAX_X_SQUARES);
-
-	for(int squareX = 0; squareX < MAX_X_SQUARES; squareX++){
-		SDL_Rect squareRect = {squareX * SQUARE_SIZE, 0, SQUARE_SIZE, SQUARE_SIZE};
-		for(int squareY = 0; squareY < MAX_Y_SQUARES; squareY++){
-			Uint8 squareColor = ((squareX+squareY) % 2 == 0)?205:155;
-
-			SDL_SetRenderDrawColor(pRenderer, squareColor, squareColor, squareColor, SDL_ALPHA_OPAQUE);
-			SDL_RenderFillRect(pRenderer, &squareRect);
-
-			squareRect.y += SQUARE_SIZE;
-		}
-	}
+	SDL_SetRenderDrawColor(pRenderer, mDisplayingHolder.grey[0].r, mDisplayingHolder.grey[0].g, mDisplayingHolder.grey[0].b, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRects(pRenderer, mDisplayingHolder.lightGreySquares.data(), mDisplayingHolder.lightGreySquares.size());
+	SDL_SetRenderDrawColor(pRenderer, mDisplayingHolder.grey[1].r, mDisplayingHolder.grey[1].g, mDisplayingHolder.grey[1].b, SDL_ALPHA_OPAQUE);
+	SDL_RenderFillRects(pRenderer, mDisplayingHolder.darkGreySquares.data(), mDisplayingHolder.darkGreySquares.size());
 
 	SDL_RenderSetViewport(pRenderer, &viewport);
 	mpImage->DrawIntoRenderer(pRenderer, mDimensions);
@@ -861,7 +846,6 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 	if(!mHolded || pencil.GetRadius() > 4){
 		SDL_Point mousePosition;
 		SDL_GetMouseState(&mousePosition.x, &mousePosition.y);
-
 		SDL_RenderSetViewport(pRenderer, &intersectionRect);
 
 		//We find the middle pixel
@@ -903,6 +887,7 @@ void Canvas::Save(){
 void Canvas::CenterInViewport(){
 	mDimensions.x = (viewport.w-mDimensions.w)/2;
 	mDimensions.y = (viewport.h-mDimensions.h)/2;
+	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
@@ -920,4 +905,41 @@ SDL_Point Canvas::GetGlobalPosition(){
 
 MutableTexture *Canvas::GetImage(){
 	return mpImage.get();
+}
+
+//DISPLAYING HOLDER METHODS:
+
+Canvas::DisplayingHolder::DisplayingHolder(Canvas *npOwner) : mpOwner(npOwner){}
+
+void Canvas::DisplayingHolder::Update(){
+	SDL_Rect dimensions = mpOwner->mDimensions;
+	//Some MAX_BORDERs cancel out but I'd rather keep it like this so it's more understandable. This is more efficient that filling the whole viewport
+	backgroundRects[0] = {0, 0, dimensions.x - MAX_BORDER, mpOwner->viewport.h};//LEFT RECT
+	backgroundRects[1] = {dimensions.x - MAX_BORDER, 0, dimensions.w + 2*MAX_BORDER, dimensions.y - MAX_BORDER};//TOP RECT
+	backgroundRects[2] = {dimensions.x - MAX_BORDER, dimensions.y - MAX_BORDER + dimensions.h + 2 * MAX_BORDER, dimensions.w + 2*MAX_BORDER, 2+dimensions.y - MAX_BORDER}; //BOTTOM RECT
+	backgroundRects[3] = {dimensions.x - MAX_BORDER + dimensions.w + 2*MAX_BORDER, 0, 1+dimensions.x - MAX_BORDER, mpOwner->viewport.h}; //RIGHT RECT
+
+	const int MAX_X_SQUARES = 10, MAX_Y_SQUARES = ceil(MAX_X_SQUARES*dimensions.h*1.0f/dimensions.w), SQUARE_SIZE = ceil(dimensions.w*1.0f/MAX_X_SQUARES);
+
+	lightGreySquares.clear(); darkGreySquares.clear();
+	//This works as long as MAX_X_SQUARES is even (would also work if MAX_Y_SQUARES is even)
+	lightGreySquares.reserve(MAX_X_SQUARES * MAX_Y_SQUARES / 2); darkGreySquares.reserve(MAX_X_SQUARES * MAX_Y_SQUARES / 2);
+	SDL_Color grey[2] = {SDL_Color{205, 205, 205}, SDL_Color{155, 155, 155}};
+
+	int index = 0;
+	for(int squareX = 0; squareX < MAX_X_SQUARES; squareX++){
+		SDL_Rect squareRect = {squareX * SQUARE_SIZE, 0, SQUARE_SIZE, SQUARE_SIZE};
+		for(int squareY = 0; squareY < MAX_Y_SQUARES; squareY++){
+			if(index == 1){
+				index = 0;
+				darkGreySquares.push_back(squareRect);
+			} else {
+				index = 1;
+				lightGreySquares.push_back(squareRect);
+			}
+
+			squareRect.y += SQUARE_SIZE;
+		}
+		index++; //Causes the greys to alternate
+	}
 }

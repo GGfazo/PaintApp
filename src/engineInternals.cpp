@@ -487,7 +487,7 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
         mHeight = nHeight;
     }
 
-    mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC ));
+    mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED));// | SDL_RENDERER_PRESENTVSYNC ));
 
 	InitializeFromFile();
 	Option::SetOptionsFont(mpFont);
@@ -649,11 +649,9 @@ void AppManager::Draw(){
 	SDL_SetRenderDrawColor(mpRenderer.get(), 255, 255, 255, SDL_ALPHA_OPAQUE);
 	SDL_RenderClear(mpRenderer.get());
 	
-	SDL_SetRenderDrawBlendMode(mpRenderer.get(), SDL_BlendMode::SDL_BLENDMODE_BLEND);
-
-	mpCanvas->DrawIntoRenderer(mpRenderer.get());
+	mpCanvas->DrawIntoRenderer(mpRenderer.get());//   <- Most consuming
 	
-	for(auto &window : mInternalWindows) window->Draw(mpRenderer.get());
+	for(auto &window : mInternalWindows) window->Draw(mpRenderer.get());// <- 2nd most consuming
 
 	mpMainBar->Draw(mpRenderer.get());
 
