@@ -155,6 +155,12 @@ class AppManager{
     static void GetWindowSize(int &width, int &height);
     static int GetMinimumWindowY();
     static std::shared_ptr<TTF_Font> GetAppFont();
+    
+    //If the option couldn't be found, a null pointer is returned.
+    static Option *FindOption(OptionInfo::OptionIDs optionID);
+
+    //If the option couldn't be found, a null pointer is returned. pWindow gets set to the window holding the option, or nullptr if the option wasn't found
+    static Option *FindOption(OptionInfo::OptionIDs optionID, InternalWindow *&pWindow);
 
     //Opens a text file with the name of the window from the InternalData forlder and creates a new window using that information 
     void InitializeWindow(const std::string &windowName);
@@ -185,9 +191,7 @@ class AppManager{
     void InitializeFromFile();
     void ProcessMainBarData();
     void ProcessWindowsData();
-
-    //If the option couldn't be found, a null pointer is returned
-    Option *FindOption(OptionInfo::OptionIDs optionID);
+    void ProcessCommandData(const std::string &commands);
 };
 /*
 class AppDataRequester{

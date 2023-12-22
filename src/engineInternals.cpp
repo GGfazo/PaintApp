@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <charconv>
+#include <ranges>
 
 void MainLoop(AppManager &appWindow, std::span<char*> args){
 	bool keepRunning = true;
@@ -338,7 +339,12 @@ void InternalWindow::UpdateContentDimensions(){
 	mContentDimensions.w = mDimensions.w-mInnerBorder*2;
 	mContentDimensions.h = mDimensions.h-mInnerBorder*2;
 
+	int totalHeight = 0;
 	for(auto &option : mOptions){
+		option->SetY(totalHeight);
+
+		if(option->mActive) totalHeight += option->mDimensions.h;
+
 		option->SetWidth(mContentDimensions.w);
 	};
 }
@@ -500,7 +506,7 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
 	mpCanvas->SetSavePath("NewImage.png");
 	NewCanvas(100, 100);
 
-	InitializeWindow("PencilWindow");
+	InitializeWindow("ToolWindow");
 	InitializeWindow("LayerWindow");
 }
 
@@ -607,6 +613,8 @@ void AppManager::Update(float deltaTime){
 	for(auto &window : mInternalWindows) window->Update(deltaTime);
 
 	mpCanvas->Update(deltaTime);
+	
+	ProcessCommandData(mpCanvas->GiveCommands());
 
 	int state = (int)windowTimer;
 	switch(state){
@@ -649,9 +657,9 @@ void AppManager::Draw(){
 	SDL_SetRenderDrawColor(mpRenderer.get(), 255, 255, 255, SDL_ALPHA_OPAQUE);
 	SDL_RenderClear(mpRenderer.get());
 	
-	mpCanvas->DrawIntoRenderer(mpRenderer.get());//   <- Most consuming
+	mpCanvas->DrawIntoRenderer(mpRenderer.get());
 	
-	for(auto &window : mInternalWindows) window->Draw(mpRenderer.get());// <- 2nd most consuming
+	for(auto &window : mInternalWindows) window->Draw(mpRenderer.get());
 
 	mpMainBar->Draw(mpRenderer.get());
 
@@ -669,6 +677,33 @@ int AppManager::GetMinimumWindowY(){
 
 std::shared_ptr<TTF_Font> AppManager::GetAppFont(){
 	return mpFont;
+}
+
+Option *AppManager::FindOption(OptionInfo::OptionIDs optionID){
+	for(const auto &window : mInternalWindows){
+		for(const auto &option : window->mOptions){
+			if(option->GetOptionID() == optionID){
+				return option.get();
+			}
+		}
+	}
+
+	DebugPrint("Could not find an Option with the specified optionID: " + std::to_string(static_cast<int>(optionID)));
+	return nullptr;
+}
+
+Option *AppManager::FindOption(OptionInfo::OptionIDs optionID, InternalWindow *&pWindow){
+	for(const auto &window : mInternalWindows){
+		for(const auto &option : window->mOptions){
+			if(option->GetOptionID() == optionID){
+				pWindow = window.get();
+				return option.get();
+			}
+		}
+	}
+
+	DebugPrint("Could not find an Option with the specified optionID: " + std::to_string(static_cast<int>(optionID)));
+	return nullptr;
 }
 
 void AppManager::InitializeWindow(const std::string &windowName){
@@ -816,28 +851,33 @@ void AppManager::ProcessWindowsData(){
 				}
 				case OptionInfo::OptionIDs::HARD_OR_SOFT:{
 					auto mLambda = [this](bool toHard){
-						mpCanvas->pencil.SetPencilType(toHard ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
+						Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
+						if(canvasPencil) canvasPencil->SetPencilType(toHard ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
 					};
 					std::function<void(bool)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
-				case OptionInfo::OptionIDs::PENCIL_RADIUS:{
+				case OptionInfo::OptionIDs::TOOL_RADIUS:{
 					auto mLambda = [this](float radius){
-						mpCanvas->pencil.SetRadius((int)radius);
+						mpCanvas->SetRadius((int)radius);
 					};
 					std::function<void(float)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::PENCIL_HARDNESS:{
-					std::function<void(float)> fn = std::bind(&Pencil::SetHardness, &(mpCanvas->pencil), std::placeholders::_1);
-					safeDataApply(option.get(), fn);
+					Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
+					if(canvasPencil){
+						std::function<void(float)> fn = std::bind(&Pencil::SetHardness, canvasPencil, std::placeholders::_1);
+						safeDataApply(option.get(), fn);
+					}
 					break;
 				}
 				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:{
 					auto mLambda = [this](int alphaMode){
-						mpCanvas->pencil.SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(alphaMode));
+						Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
+						if(canvasPencil) canvasPencil->SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(alphaMode));
 					};
 					std::function<void(int)> fn = mLambda;
 					safeDataApply(option.get(), fn);
@@ -845,7 +885,7 @@ void AppManager::ProcessWindowsData(){
 				}
 				case OptionInfo::OptionIDs::CHOOSE_TOOL:{
 					auto mLambda = [this](int chosenTool){
-						mpCanvas->usedTool = static_cast<Canvas::Tool>(chosenTool);
+						mpCanvas->SetTool(static_cast<Canvas::Tool>(chosenTool));
 					};
 					std::function<void(int)> fn = mLambda;
 					safeDataApply(option.get(), fn);
@@ -922,6 +962,10 @@ void AppManager::ProcessWindowsData(){
 							//Finally we delete this window as it's only purporse is to create a new canvas
 							mInternalWindows.erase(mInternalWindows.begin()+i);
 							i--;
+
+							//Finally, as a new canvas was created, we update select layer slider max
+							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
+							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
 						}
 					};
 					std::function<void(bool)> fn = mLambda;
@@ -942,7 +986,7 @@ void AppManager::ProcessWindowsData(){
 				}
 				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:{
 					auto mLambda = [this](SDL_Color pencilDisplay){
-						mpCanvas->pencilDisplayMainColor = pencilDisplay;
+						mpCanvas->toolPreviewMainColor = pencilDisplay;
 					};
 					std::function<void(SDL_Color)> fn = mLambda;
 					safeDataApply(option.get(), fn);
@@ -950,7 +994,7 @@ void AppManager::ProcessWindowsData(){
 				}
 				case OptionInfo::OptionIDs::PENCIL_DISPLAY_ALTERNATE_COLOR:{
 					auto mLambda = [this](SDL_Color pencilDisplay){
-						mpCanvas->pencilDisplayAlternateColor = pencilDisplay;
+						mpCanvas->toolPreviewAlternateColor = pencilDisplay;
 					};
 					std::function<void(SDL_Color)> fn = mLambda;
 					safeDataApply(option.get(), fn);
@@ -980,15 +1024,34 @@ void AppManager::ProcessWindowsData(){
 	}
 }
 
-Option *AppManager::FindOption(OptionInfo::OptionIDs optionID){
-	for(const auto &window : mInternalWindows){
-		for(const auto &option : window->mOptions){
-			if(option->GetOptionID() == optionID){
-				return option.get();
-			}
-		}
-	}
+void AppManager::ProcessCommandData(const std::string &commands){
+	if(commands.empty()) return;
+	else DebugPrint(commands);
 
-	DebugPrint("Could not find an Option with the specified optionID: " + std::to_string(static_cast<int>(optionID)));
-	return nullptr;
+	//This might be slightly slower than a common for loop, but good enough for its readability 
+	for (const auto& command : commands | std::views::split('\n')) {
+		if(*command.begin() == '#') continue; //'#' is used to denote comments
+
+		std::string stringCommand = std::string(command.begin(), command.end());
+		int firstIndex = 0, lastIndex = stringCommand.find_first_of('_', firstIndex);
+
+		Option *pOption = nullptr;
+		InternalWindow *pWindow = nullptr;
+		try{
+			pOption = FindOption(static_cast<OptionInfo::OptionIDs>(stoi(stringCommand.substr(firstIndex, lastIndex-firstIndex))), pWindow);
+		}
+		catch(const std::invalid_argument &e){
+			ErrorPrint(stringCommand.substr(firstIndex, lastIndex-firstIndex) + " is not a valid number");
+			continue;
+		}
+
+		firstIndex = lastIndex + 1; lastIndex = stringCommand.find_first_of('_', firstIndex);
+
+		if(pOption == nullptr || pOption->mInputMethod != pOption->CharToInputMethod(stringCommand[firstIndex])) return;
+
+		pOption->FetchInfo(stringCommand.substr(lastIndex+1));
+
+		//Finally we update the window holding the option, in case any size was changed. This may be moved out of the for loop if it has an impact on performance
+		pWindow->UpdateContentDimensions();
+	}
 }

@@ -1,0 +1,6 @@
+#This is just a temporal way to have tool setups "organized". These should be replaced by TAGS that can be added to any option and then filtered by
+0_H_Active/T_
+1_T_Active/F_
+2_S_Active/F_
+3_S_Active/F_
+4_C_Active/F_

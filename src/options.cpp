@@ -727,6 +727,8 @@ Option::~Option(){
 }
 
 bool Option::HandleEvent(SDL_Event *event){
+	if(!mActive) return false;
+
 	SDL_Point originalMousePosition;
 	int *eventMouseX = nullptr, *eventMouseY = nullptr;
 
@@ -797,6 +799,8 @@ bool Option::HandleEvent(SDL_Event *event){
 	return eventHandled || wasOptionClicked;
 }
 void Option::Draw(SDL_Renderer *pRenderer){
+	if(!mActive) return;
+
 	SDL_Rect previousViewport = {-1, -1, -1, -1};
 	SDL_RenderGetViewport(pRenderer, &previousViewport); //A window's rect
 
@@ -923,6 +927,11 @@ void Option::SetHeight(int nHeight){
 	}
 }
 
+void Option::SetY(int nY){
+	//Currently it's just this easy, since everything from the option that has to be drawn or handle an event uses the option as a viewport
+	mDimensions.y = nY;
+}
+
 void Option::SetOptionText(const char *pNewText){
 	
 	mOptionText.reset(new ConstantText(pNewText, mpOptionsFont));
@@ -970,6 +979,29 @@ void Option::SetOptionText(const char *pNewText){
 
 OptionInfo::OptionIDs Option::GetOptionID(){
 	return mOptionID;
+}
+
+Option::InputMethod Option::CharToInputMethod(char inputIdentifier){
+	switch(inputIdentifier){
+		case 'F':
+			return InputMethod::TEXT_FIELD;
+		case 'H':
+			return InputMethod::HEX_TEXT_FIELD;
+		case 'W':
+			return InputMethod::WHOLE_TEXT_FIELD;
+		case 'T':
+			return InputMethod::TICK;
+		case 'A':
+			return InputMethod::ACTION;
+		case 'S':
+			return InputMethod::SLIDER;
+		case 'C':
+			return InputMethod::CHOICES_ARRAY;
+		default:
+			ErrorPrint("Invalid input method: "+inputIdentifier); break;
+	}
+	
+	return static_cast<InputMethod>(-1);
 }
 
 void Option::FetchInfo(std::string_view info){
@@ -1032,25 +1064,9 @@ void Option::HandleInfo(std::string_view info){
 
 	previousIndex = currentIndex+1;
 	currentIndex = info.find_first_of('_', previousIndex);
-	char inputMethod = info[previousIndex];
 
-	switch(inputMethod){
-		case 'F':
-			SetInputMethod(InputMethod::TEXT_FIELD); break;
-		case 'H':
-			SetInputMethod(InputMethod::HEX_TEXT_FIELD); break;
-		case 'W':
-			SetInputMethod(InputMethod::WHOLE_TEXT_FIELD); break;
-		case 'T':
-			SetInputMethod(InputMethod::TICK); break;
-		case 'A':
-			SetInputMethod(InputMethod::ACTION); break;
-		case 'S':
-			SetInputMethod(InputMethod::SLIDER); break;	
-		case 'C':
-			SetInputMethod(InputMethod::CHOICES_ARRAY); break;
-		default:
-			ErrorPrint("Invalid input method: "+inputMethod); break;
+	if(InputMethod nInputMethod = CharToInputMethod(info[previousIndex]); nInputMethod != InputMethod::INVALID){
+		SetInputMethod(nInputMethod);
 	}
 
 	//We set the index ready for the next info and declare i, the variable that will be used inside the loop 
@@ -1116,6 +1132,7 @@ std::unique_ptr<Option::OptionCommands::t_commands_map> Option::OptionCommands::
 
 void Option::OptionCommands::LoadCommands(){
 	mCommandsMap.reset(new t_commands_map());
+	mCommandsMap->emplace("Active", OptionCommands::SetActive);
 	mCommandsMap->emplace("DefaultText", OptionCommands::SetDefaultText);
 	mCommandsMap->emplace("SliderMin", OptionCommands::SetMinValue);
 	mCommandsMap->emplace("SliderMax", OptionCommands::SetMaxValue);
@@ -1136,6 +1153,10 @@ void Option::OptionCommands::HandleCommand(Option *pOption, std::string_view com
 	} else {
 		OptionCommands::UnusableInfo(pOption, command);
 	}
+}
+
+void Option::OptionCommands::SetActive(Option *pOption, std::string_view nActive){
+	pOption->mActive = nActive.size() == 1 && nActive[0] == 'T';
 }
 
 void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view nValue){

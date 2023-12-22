@@ -295,7 +295,7 @@ struct OptionInfo{
     enum class OptionIDs : int{
         DRAWING_COLOR = 0,
         HARD_OR_SOFT = 1,
-        PENCIL_RADIUS = 2,
+        TOOL_RADIUS = 2,
         PENCIL_HARDNESS = 3,
         SOFT_ALPHA_CALCULATION = 4,
         
@@ -364,6 +364,7 @@ class Option{
     public:
     SDL_Point clickedPoint = {0,0};
     enum class InputMethod{
+        INVALID = -1,
         TEXT_FIELD, //A text field for plain text, like a name
         HEX_TEXT_FIELD, //A text field in hexadecimal holding a color
         WHOLE_TEXT_FIELD, //A text field is used as input for numbers
@@ -381,9 +382,13 @@ class Option{
 
     void SetWidth(int nWidth);
     void SetHeight(int nHeight);
+    void SetY(int nY);
     void SetOptionText(const char *pNewText);
 
     OptionInfo::OptionIDs GetOptionID();
+
+    //Returns an InputMethod based on the character passed
+    InputMethod CharToInputMethod(char inputIdentifier);
 
     void FetchInfo(std::string_view info);
 
@@ -402,6 +407,9 @@ class Option{
 
     //Gets set to true when any relevant data gets changed and therefore should be applied (example, activating a button to change from pencil to eraser)
     bool mModified = false;
+
+    //If set to false, functions like Draw or HandleEvent will immediately return, in the latter the value returned is 'false'
+    bool mActive = true;
 
     //Used to determine which member from the 'Input' union to use
     InputMethod mInputMethod;
@@ -437,6 +445,7 @@ class Option{
         
         static void HandleCommand(Option *pOption, std::string_view command);
 
+        static void SetActive(Option *pOption, std::string_view nActive);
         static void SetInitialValue(Option *pOption, std::string_view nValue);
         static void SetOptionText(Option *pOption, std::string_view nOptionText);
         static void SetMinValue(Option *pOption, std::string_view nMin);
@@ -454,4 +463,7 @@ class Option{
     
     //TODO: eventually find a work around, so that 'options.hpp' does not need a direct reference to a class present in 'engineInternals.hpp' (which includes 'options.hpp')
     friend class InternalWindow;
+
+    //TODO: only a friend because of the Load/Unload Commands, eventually will be changed
+    friend class AppManager;
 };

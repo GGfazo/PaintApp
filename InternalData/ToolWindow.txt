@@ -1,0 +1,10 @@
+0_0_200_200_90_
+
+#We don't have to use a specific order, as here for example 20 is the first one, since it's the tool selection. I personally prefer to avoid this.
+20_C_AddChoice/Sprites/pencil.png_AddChoice/Sprites/eraser.png_AddChoice/Sprites/colorPicker.png_OptionText/ToDo tool_InitialValue/0_
+
+0_H_DefaultText/Hex Color_OptionText/Color_InitialValue/000000_
+1_T_OptionText/Hard_InitialValue/F_
+2_S_SliderMin/1_SliderMax/200_OptionText/Size_InitialValue/3_
+3_S_SliderDigits/2_SliderMin/0_SliderMax/1_OptionText/Hardness_InitialValue/0_
+4_C_AddChoice/Sprites/linear.png_AddChoice/Sprites/quadratic.png_AddChoice/Sprites/logarithmic.png_OptionText/Method_InitialValue/0_
