@@ -461,8 +461,13 @@ void ColorPicker::GrabColor(Canvas *pCanvas, MutableTexture *pTexture, SDL_Point
 	bool isValid = false;
 	SDL_Color color = pTexture->GetPixelColor(pixel, &isValid);
 	if(isValid){
-		std::stringstream hexColor;		
-		hexColor << std::hex << ((((unsigned int)color.r)<<16u) + (((unsigned int)color.g)<<8u) + (unsigned int)color.b);
+		std::stringstream hexColor;
+		
+		//We transform the red, green and blue into hex, making sure each one takes 2 characters and, in case they weren't 2 characters wide, we fill the hex with leading '0'
+		hexColor << std::hex << std::setw(2) << std::setfill('0') << ((unsigned int)color.r)
+							 << std::setw(2) << std::setfill('0') << ((unsigned int)color.g)
+							 << std::setw(2) << std::setfill('0') << ((unsigned int)color.b);
+							 
 		pCanvas->AppendCommand("0_H_InitialValue/"+hexColor.str()+"_");
 	}
 }

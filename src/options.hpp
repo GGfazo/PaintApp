@@ -271,7 +271,7 @@ class ChoicesArray{
     bool SetLastChosenOption(int nLastChosen);
     int GetLastChosenOption();
 
-    //Only sets mLastChosen, doesn't have any effect on the textures nor does it check for it to be in range
+    //Sets mLastChosen to the given value without exception, only applied changes to the textures if possible
     void UncheckedSetLastChosenOption(int nLastChosen);
 
     bool HandleEvent(SDL_Event *event);
@@ -362,7 +362,6 @@ struct OptionInfo{
 
 class Option{
     public:
-    SDL_Point clickedPoint = {0,0};
     enum class InputMethod{
         INVALID = -1,
         TEXT_FIELD, //A text field for plain text, like a name
@@ -372,6 +371,14 @@ class Option{
         CHOICES_ARRAY, //An array of buttons to choose a preference (eg: tools)
         TICK, //A button that either has the value true or false is used as input
         ACTION //A button that performs an action when clicked
+    };
+
+    //Refers to the possible tags an Option instance may have. A single option may hold more than one. This feature may be changed into something like a std::string
+    enum class Tag : unsigned long{
+        NONE = 0x00,
+        PENCIL_OPTION = 0x01,
+        ERASER_OPTION = 0x02,
+        COLOR_PICKER_OPTION = 0x04
     };
 
     Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo = "");
@@ -392,6 +399,15 @@ class Option{
 
     void FetchInfo(std::string_view info);
 
+    //Returns a value of type Tag that holds all the tags passed as parametters
+    //static Tag ComposeTag();
+    //Returns true if the option has the given tag, even if combined with others. Returns false if the given tag, or part of it, can't be found on the option
+    bool HasTag(Tag tag);
+    //Given a tag, returns true if any of the tags coincide with the ones of the option. Returns false if none coincide
+    bool HasAnyTag(Tag tags);
+
+    static Tag PrimitiveToTag(unsigned int primitive);
+
     static void SetOptionsFont(std::shared_ptr<TTF_Font> npOptionsFont);
 
     private:
@@ -404,6 +420,9 @@ class Option{
     //Assigned in the constructor, it specifies which option is. It is only used in GetData() as the first 4 characters of the resulting string.
     //The handling of the different IDs should be done outside the Option class
     OptionInfo::OptionIDs mOptionID;
+
+    //Tags are used to differentiate and filter different options with similar features, rather than using a set of ids
+    Tag mTags = Tag::NONE;
 
     //Gets set to true when any relevant data gets changed and therefore should be applied (example, activating a button to change from pencil to eraser)
     bool mModified = false;
@@ -446,6 +465,7 @@ class Option{
         static void HandleCommand(Option *pOption, std::string_view command);
 
         static void SetActive(Option *pOption, std::string_view nActive);
+        static void SetTag(Option *pOption, std::string_view nTag);
         static void SetInitialValue(Option *pOption, std::string_view nValue);
         static void SetOptionText(Option *pOption, std::string_view nOptionText);
         static void SetMinValue(Option *pOption, std::string_view nMin);

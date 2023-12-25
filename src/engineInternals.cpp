@@ -105,6 +105,18 @@ std::vector<std::shared_ptr<OptionInfo>> &InternalWindow::GetTemporalData(){
 	return mTemporalData;
 }
 
+std::vector<Option*> InternalWindow::GetOptionsWithTag(Option::Tag identifier){
+	std::vector<Option*> result;
+
+	for(const auto& option : mOptions){
+		if(option->HasTag(identifier)){
+			result.push_back(option.get());
+		}
+	}
+
+	return result;
+}
+
 const std::string_view InternalWindow::GetName(){
 	return M_WINDOW_NAME;
 }
@@ -565,7 +577,7 @@ void AppManager::HandleEvent(SDL_Event *event){
 	if(event->type == SDL_DROPFILE){
 		const char* sourceDir = event->drop.file;
 		AddImage(sourceDir);
-		return; //No other 
+		return;
     }
 
 	//Just makes sure that the text input stops when any non text field is clicked
@@ -573,9 +585,7 @@ void AppManager::HandleEvent(SDL_Event *event){
 
 	hasBeenHandled = mpMainBar->HandleEvent(event);
 
-	ProcessMainBarData();
-
-	//We handle the events counter clockwise in order that those windows drawn last (and therefore may overlap others) are the ones who first get the events
+	//We handle the events counter clockwise so that those windows drawn last (and therefore may be on top of others) are the ones who first get the events
 	for(auto it = mInternalWindows.rbegin(); it != mInternalWindows.rend(); it++){
 		hasBeenHandled = (*it)->HandleEvent(event);
 
@@ -583,7 +593,7 @@ void AppManager::HandleEvent(SDL_Event *event){
 			SDL_Keymod keymod = SDL_GetModState();
 			if(keymod & KMOD_CTRL){
 				auto base = (it+1).base();
-				std::rotate(base, base+1, mInternalWindows.end());
+				std::rotate(base, base+1, mInternalWindows.end()); //We move the window to the end, so that it's draws on the front
 			} else if(keymod & KMOD_ALT){
 				(*it)->Minimize();
 			}
@@ -591,7 +601,7 @@ void AppManager::HandleEvent(SDL_Event *event){
 		}
 	}
 
-	ProcessWindowsData();
+	if(!hasBeenHandled && !SDL_IsTextInputActive()) hasBeenHandled = HandleHotkeys(event);
 
 	if(!hasBeenHandled) mpCanvas->HandleEvent(event);
 }
@@ -611,6 +621,9 @@ void AppManager::Update(float deltaTime){
 	}
 
 	for(auto &window : mInternalWindows) window->Update(deltaTime);
+
+	ProcessMainBarData();
+	ProcessWindowsData();
 
 	mpCanvas->Update(deltaTime);
 	
@@ -737,6 +750,21 @@ void AppManager::InitializeWindow(const std::string &windowName){
 		ErrorPrint("Could not open the file InternalData/"+windowName+".txt");
 		return;
 	}
+}
+
+bool AppManager::HandleHotkeys(SDL_Event *pEvent){
+	if(pEvent->type == SDL_KEYDOWN){
+		switch(pEvent->key.keysym.sym){
+			case SDLK_r: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/0_"); return true;
+			case SDLK_f: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/1_"); return true;
+			case SDLK_v: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/2_"); return true;
+			case SDLK_t: FindOption(OptionInfo::OptionIDs::SELECT_LAYER)->FetchInfo("InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer()+1)+"_"); return true;
+			case SDLK_g: FindOption(OptionInfo::OptionIDs::SELECT_LAYER)->FetchInfo("InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer()-1)+"_"); return true;
+			case SDLK_SPACE: FindOption(OptionInfo::OptionIDs::ADD_LAYER)->FetchInfo("InitialValue/T_"); return true;
+		}
+	}
+
+	return false;
 }
 
 void AppManager::InitializeFromFile(){
@@ -1028,30 +1056,66 @@ void AppManager::ProcessCommandData(const std::string &commands){
 	if(commands.empty()) return;
 	else DebugPrint(commands);
 
-	//This might be slightly slower than a common for loop, but good enough for its readability 
+	//This might be slightly slower than a common for loop
 	for (const auto& command : commands | std::views::split('\n')) {
-		if(*command.begin() == '#') continue; //'#' is used to denote comments
+		if(*command.begin() == '#' || command.size() == 0) continue; //'#' is used to denote comments. Also, if the command is empty, there's no point in analizing it
 
+		//We obtain a string of the current command and the first segment of the command, located between the both indexes
 		std::string stringCommand = std::string(command.begin(), command.end());
 		int firstIndex = 0, lastIndex = stringCommand.find_first_of('_', firstIndex);
 
-		Option *pOption = nullptr;
-		InternalWindow *pWindow = nullptr;
-		try{
-			pOption = FindOption(static_cast<OptionInfo::OptionIDs>(stoi(stringCommand.substr(firstIndex, lastIndex-firstIndex))), pWindow);
+		if(lastIndex-firstIndex == 1 && *command.begin() == 'T'){
+			//We are performing a tag command, which means the next number is the tag filtered by
+			firstIndex = lastIndex + 1; lastIndex = stringCommand.find_first_of('_', firstIndex);
+
+			//We attempt getting the tag specified in the command. Remember that the number written in the command may not match the tag itself
+			unsigned long filterTag;
+			try{
+				std::from_chars(stringCommand.data()+firstIndex, stringCommand.data()+lastIndex, filterTag);
+			}
+			catch(const std::invalid_argument &e){
+				ErrorPrint(stringCommand.substr(firstIndex, lastIndex-firstIndex) + " is not a valid number");
+				continue;
+			}
+			
+			std::vector<Option*> optionsWithTag;
+			std::vector<InternalWindow*> windowsWithOptions; //These are needed to update their options distribution, if needed
+
+			//We gather every option that holds the specified tag and their windows
+			for(const auto& window : mInternalWindows){
+				std::vector<Option*> currentOptions = window->GetOptionsWithTag(Option::PrimitiveToTag(filterTag));
+				if(currentOptions.size() != 0){
+					optionsWithTag.insert(optionsWithTag.end(), currentOptions.begin(), currentOptions.end());
+					windowsWithOptions.push_back(window.get());
+				}
+			}
+
+			//Finally we apply the commands on the affected options and update the windows in case of any resize/activation-related commands
+			for(const auto& option : optionsWithTag) option->FetchInfo(stringCommand.substr(lastIndex+1));
+			for(const auto& window : windowsWithOptions) window->UpdateContentDimensions();
+			
+		} else {
+			//We are performing a common command, where the first number is the id and then a character to confirm the input method
+			Option *pOption = nullptr; InternalWindow *pWindow = nullptr;
+
+			//We attempt to get the option requested by the command
+			try{
+				pOption = FindOption(static_cast<OptionInfo::OptionIDs>(stoi(stringCommand.substr(firstIndex, lastIndex-firstIndex))), pWindow);
+			}
+			catch(const std::invalid_argument &e){
+				ErrorPrint(stringCommand.substr(firstIndex, lastIndex-firstIndex) + " is not a valid number");
+				continue;
+			}
+
+			//We advance to the next segment
+			firstIndex = lastIndex + 1; lastIndex = stringCommand.find_first_of('_', firstIndex);
+
+			//We check that the option exists and that the input method matches the one specified in the command
+			if(pOption == nullptr || pOption->mInputMethod != pOption->CharToInputMethod(stringCommand[firstIndex])) return;
+
+			//Finally we apply the commands on the affected option and update the window in case of any resize/activation-related commands
+			pOption->FetchInfo(stringCommand.substr(lastIndex+1));
+			pWindow->UpdateContentDimensions();
 		}
-		catch(const std::invalid_argument &e){
-			ErrorPrint(stringCommand.substr(firstIndex, lastIndex-firstIndex) + " is not a valid number");
-			continue;
-		}
-
-		firstIndex = lastIndex + 1; lastIndex = stringCommand.find_first_of('_', firstIndex);
-
-		if(pOption == nullptr || pOption->mInputMethod != pOption->CharToInputMethod(stringCommand[firstIndex])) return;
-
-		pOption->FetchInfo(stringCommand.substr(lastIndex+1));
-
-		//Finally we update the window holding the option, in case any size was changed. This may be moved out of the for loop if it has an impact on performance
-		pWindow->UpdateContentDimensions();
 	}
 }

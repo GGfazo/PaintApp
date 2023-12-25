@@ -1,7 +1,7 @@
 #I am genually sorry if this doesn't work but it is the best I managed to get, suggestions are allowed though
 
 cmake_minimum_required(VERSION 3.23.1)
-set (CMAKE_CXX_STANDARD 20)
+set (CMAKE_CXX_STANDARD 23)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 
 project(EditBMP)

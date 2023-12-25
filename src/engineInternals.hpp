@@ -31,6 +31,8 @@ class InternalWindow{
     void AddTemporalData(OptionInfo *newData);
     std::vector<std::shared_ptr<OptionInfo>> &GetTemporalData();
 
+    std::vector<Option*> GetOptionsWithTag(Option::Tag identifier);
+
     const std::string_view GetName();
 
     //Either minimizes or un-minimizes the window, depending on its previous state. The window, when minimized, just displays a small logo in a square.
@@ -186,7 +188,7 @@ class AppManager{
     std::unique_ptr<MainBar> mpMainBar;
     static std::vector<std::unique_ptr<InternalWindow>> mInternalWindows;
 
-    void InitializeCanvas();
+    bool HandleHotkeys(SDL_Event *pEvent);
 
     void InitializeFromFile();
     void ProcessMainBarData();

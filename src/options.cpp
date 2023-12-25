@@ -5,6 +5,7 @@
 #include <functional>
 #include <algorithm>
 #include <charconv>
+#include <utility>
 
 void *TextInputManager::mRequester = nullptr;
 
@@ -634,6 +635,18 @@ int ChoicesArray::GetLastChosenOption(){
 }
 
 void ChoicesArray::UncheckedSetLastChosenOption(int nLastChosen){
+	//We check that mLastChosen was valid in order to set the texture back to its original color mod
+	if(mLastChosen < mTextures.size()){
+		//We set the previously chosen to its original color
+		SDL_SetTextureColorMod(mTextures[mLastChosen].get(), 255, 255, 255);
+	}
+	
+	//We check that nLastChosen is valid in order to highlight the corresponding texture
+	if(nLastChosen < mTextures.size()){
+		//We make the currently selected a bit darker
+		SDL_SetTextureColorMod(mTextures[nLastChosen].get(), 180, 180, 180);
+	}
+	
 	mLastChosen = nLastChosen;
 }
 
@@ -1016,6 +1029,24 @@ void Option::FetchInfo(std::string_view info){
 	Option::OptionCommands::UnloadCommands();
 }
 
+bool Option::HasTag(Tag tag){
+	return (std::to_underlying(tag) == (std::to_underlying(tag) & std::to_underlying(mTags)));
+}
+
+bool Option::HasAnyTag(Tag tags){
+	return ((std::to_underlying(tags) & std::to_underlying(mTags)) != 0);
+}
+
+Option::Tag Option::PrimitiveToTag(unsigned int primitive){
+	switch(primitive){
+		case 0: return Tag::NONE;
+		case 1: return Tag::PENCIL_OPTION;
+		case 2: return Tag::ERASER_OPTION;
+		case 3: return Tag::COLOR_PICKER_OPTION;
+		default: ErrorPrint("The tag "+std::to_string(primitive)+" doesn't exist"); return Tag::NONE;
+	}
+}
+
 void Option::SetOptionsFont(std::shared_ptr<TTF_Font> npOptionsFont){
     mpOptionsFont.reset(npOptionsFont.get(), PointerDeleter{});
 }
@@ -1120,7 +1151,7 @@ void Option::SetInputMethod(Option::InputMethod nInputMethod){
 			break;
 		
 		default:
-			ErrorPrint("Invalid input method: "+std::to_string(static_cast<int>(mInputMethod)));
+			ErrorPrint("Invalid input method: "+std::to_string(std::to_underlying(mInputMethod)));
 			break;
 	}
 }
@@ -1133,6 +1164,7 @@ std::unique_ptr<Option::OptionCommands::t_commands_map> Option::OptionCommands::
 void Option::OptionCommands::LoadCommands(){
 	mCommandsMap.reset(new t_commands_map());
 	mCommandsMap->emplace("Active", OptionCommands::SetActive);
+	mCommandsMap->emplace("Tag", OptionCommands::SetTag);
 	mCommandsMap->emplace("DefaultText", OptionCommands::SetDefaultText);
 	mCommandsMap->emplace("SliderMin", OptionCommands::SetMinValue);
 	mCommandsMap->emplace("SliderMax", OptionCommands::SetMaxValue);
@@ -1157,6 +1189,22 @@ void Option::OptionCommands::HandleCommand(Option *pOption, std::string_view com
 
 void Option::OptionCommands::SetActive(Option *pOption, std::string_view nActive){
 	pOption->mActive = nActive.size() == 1 && nActive[0] == 'T';
+}
+
+void Option::OptionCommands::SetTag(Option *pOption, std::string_view nTag){
+	unsigned long nChosen;
+
+	try{
+		std::from_chars(nTag.data(), nTag.data()+nTag.size(), nChosen);
+	} catch(std::invalid_argument const &e){
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" could not transform" + std::string(nTag.data(), nTag.data()+nTag.size()) + "into a unsigned long");
+		return;
+	}
+
+	Tag chosenTag = PrimitiveToTag(nChosen);	
+
+	//We add the tag, maintaining the rest
+	pOption->mTags = static_cast<Tag>(std::to_underlying(pOption->mTags) | std::to_underlying(chosenTag)); 
 }
 
 void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view nValue){
@@ -1197,7 +1245,7 @@ void Option::OptionCommands::SetOptionText(Option *pOption, std::string_view nOp
 
 void Option::OptionCommands::SetMinValue(Option *pOption, std::string_view nMin){
 	if(pOption->mInputMethod != Option::InputMethod::SLIDER){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(std::to_underlying(pOption->mInputMethod)));
 		return;
 	}
 
@@ -1206,13 +1254,13 @@ void Option::OptionCommands::SetMinValue(Option *pOption, std::string_view nMin)
 		std::from_chars(nMin.data(), nMin.data()+nMin.size(), minValue);
 		pOption->input.mpSlider->SetMinValue(minValue);
 	} catch(std::invalid_argument const &e){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" could not transform" + std::string(nMin.data(), nMin.data()+nMin.size()) + "into a float");
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" could not transform" + std::string(nMin.data(), nMin.data()+nMin.size()) + "into a float");
 	}
 }
 
 void Option::OptionCommands::SetMaxValue(Option *pOption, std::string_view nMax){
 	if(pOption->mInputMethod != Option::InputMethod::SLIDER){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(std::to_underlying(pOption->mInputMethod)));
 		return;
 	}
 
@@ -1221,13 +1269,13 @@ void Option::OptionCommands::SetMaxValue(Option *pOption, std::string_view nMax)
 		std::from_chars(nMax.data(), nMax.data()+nMax.size(), maxValue);
 		pOption->input.mpSlider->SetMaxValue(maxValue);
 	} catch(std::invalid_argument const &e){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" could not transform" + std::string(nMax.data(), nMax.data()+nMax.size()) + "into a float");
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" could not transform" + std::string(nMax.data(), nMax.data()+nMax.size()) + "into a float");
 	}
 }
 
 void Option::OptionCommands::SetDecimalDigits(Option *pOption, std::string_view nDigits){
 	if(pOption->mInputMethod != Option::InputMethod::SLIDER){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" is not a slider, inputMethod: "+std::to_string(std::to_underlying(pOption->mInputMethod)));
 		return;
 	}
 
@@ -1236,13 +1284,13 @@ void Option::OptionCommands::SetDecimalDigits(Option *pOption, std::string_view 
 		std::from_chars(nDigits.data(), nDigits.data()+nDigits.size(), decimalDigits);
 		pOption->input.mpSlider->SetDecimalPlaces(decimalDigits);
 	} catch(std::invalid_argument const &e){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" could not transform" + std::string(nDigits.data(), nDigits.data()+nDigits.size()) + "into a float");
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" could not transform" + std::string(nDigits.data(), nDigits.data()+nDigits.size()) + "into a float");
 	}
 }
 
 void Option::OptionCommands::AddChoiceToArray(Option *pOption, std::string_view nDefaultText){
 	if(pOption->mInputMethod != Option::InputMethod::CHOICES_ARRAY){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a choice array, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" is not a choice array, inputMethod: "+std::to_string(std::to_underlying(pOption->mInputMethod)));
 		return;
 	}
 
@@ -1251,7 +1299,7 @@ void Option::OptionCommands::AddChoiceToArray(Option *pOption, std::string_view 
 
 void Option::OptionCommands::SetDefaultText(Option *pOption, std::string_view nDefaultText){
 	if(pOption->mInputMethod != Option::InputMethod::TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::WHOLE_TEXT_FIELD && pOption->mInputMethod != Option::InputMethod::HEX_TEXT_FIELD){
-		ErrorPrint("id " + std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" is not a textfield, inputMethod: "+std::to_string(static_cast<unsigned int>(pOption->mInputMethod)));
+		ErrorPrint("id " + std::to_string(std::to_underlying(pOption->mOptionID))+" is not a textfield, inputMethod: "+std::to_string(std::to_underlying(pOption->mInputMethod)));
 		return;
 	}
 
@@ -1259,5 +1307,5 @@ void Option::OptionCommands::SetDefaultText(Option *pOption, std::string_view nD
 }
 
 void Option::OptionCommands::UnusableInfo(Option *pOption, std::string_view nUnusableInfo){
-	ErrorPrint("id "+std::to_string(static_cast<unsigned int>(pOption->mOptionID))+" found some garbage \'"+std::string(nUnusableInfo.data(), nUnusableInfo.data()+nUnusableInfo.size())+'\'');
+	ErrorPrint("id "+std::to_string(std::to_underlying(pOption->mOptionID))+" found some garbage \'"+std::string(nUnusableInfo.data(), nUnusableInfo.data()+nUnusableInfo.size())+'\'');
 }
