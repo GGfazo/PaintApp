@@ -437,19 +437,20 @@ MainBar::MainBar(SDL_Rect nDimensions) : mDimensions(nDimensions){
 bool MainBar::HandleEvent(SDL_Event *pEvent){
 	if(pEvent->type == SDL_MOUSEBUTTONDOWN){
 		SDL_Point mousePos = {pEvent->button.x, pEvent->button.y};
-		if(SDL_PointInRect(&mousePos, &mDimensions)){
-			bool handledInput;
+		bool handledInput;
 
-			for(int i = 0; i < mMainOptions.size(); ++i){
-				handledInput = mMainOptions[i].HandleEvent(pEvent);
-				
-				if(handledInput){
-					mCurrentClickedIndex = i;
-					return true;
-				}
+		for(int i = 0; i < mMainOptions.size(); ++i){
+			handledInput = mMainOptions[i].HandleEvent(pEvent);
+			
+			if(handledInput){
+				mCurrentClickedIndex = i;
+				return true;
 			}
-			mCurrentClickedIndex = -1;
+		}
+		
+		mCurrentClickedIndex = -1;
 
+		if(SDL_PointInRect(&mousePos, &mDimensions)){
 			return true;
 		}
 	} else {
@@ -474,13 +475,15 @@ std::shared_ptr<OptionInfo> MainBar::GetData(){
 		case static_cast<int>(MainOptionIDs::SAVE):
 		case static_cast<int>(MainOptionIDs::CLEAR):
 		case static_cast<int>(MainOptionIDs::NEW_CANVAS):
-		case static_cast<int>(MainOptionIDs::PREFERENCES):
-			return std::shared_ptr<OptionInfo>(new OptionInfo(static_cast<OptionInfo::OptionIDs>(mCurrentClickedIndex), true));
+		case static_cast<int>(MainOptionIDs::PREFERENCES):{
+			int clickedIndex = mCurrentClickedIndex;
+			mCurrentClickedIndex = -1; //Reset the current clicked index to -1 to prevent repeated firing of the same option
+			return std::shared_ptr<OptionInfo>(new OptionInfo(static_cast<OptionInfo::OptionIDs>(clickedIndex), true));
+		}
 		default:
 			ErrorPrint("Current clicked index could not be converted into a main option: "+std::to_string(mCurrentClickedIndex));
 			return std::shared_ptr<OptionInfo>(new OptionInfo());
 	}
-	
 }
 
 
@@ -809,6 +812,15 @@ void AppManager::InitializeFromFile(){
 						}
 						break;
 
+					//This character indicates the maximum amount of undo operations the app will ever store at the same time
+					case 'U':
+						if(line[1] != ':'){
+							ErrorPrint("Could not read app's maximum undo storage, as the ':' after the 'U' is missing");
+						} else {
+							Canvas::maxAmountOfUndoActionsSaved = stoi(line.substr(2));
+						}
+						break;
+
 					//This character indicates the image that the program will open upon start
 					case 'I':
 						if(line[1] != ':'){
@@ -922,7 +934,7 @@ void AppManager::ProcessWindowsData(){
 				case OptionInfo::OptionIDs::ADD_LAYER:{
 					auto mLambda = [this](bool addLayer){
 						if(addLayer){
-							mpCanvas->GetImage()->AddLayer(mpRenderer.get());
+							mpCanvas->AddLayer();
 							
 							//We update select layer slider max
 							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
@@ -938,7 +950,7 @@ void AppManager::ProcessWindowsData(){
 				case OptionInfo::OptionIDs::REMOVE_CURRENT_LAYER:{
 					auto mLambda = [this](bool deleteLayer){
 						if(deleteLayer){
-							mpCanvas->GetImage()->DeleteCurrentLayer();
+							mpCanvas->DeleteCurrentLayer();
 							
 							//We update select layer slider max
 							Option *layerSelector = FindOption(OptionInfo::OptionIDs::SELECT_LAYER);
@@ -953,7 +965,7 @@ void AppManager::ProcessWindowsData(){
 				}
 				case OptionInfo::OptionIDs::SELECT_LAYER:{
 					auto mLambda = [this](float layer){
-						mpCanvas->GetImage()->SetLayer((int)layer);
+						mpCanvas->SetLayer((int)layer);
 					};
 					std::function<void(float)> fn = mLambda;
 					safeDataApply(option.get(), fn);

@@ -3,7 +3,7 @@
 #include <fstream>
 #include <source_location>
 
-#define DEBUG_INFO 1 // 1 = Display debug info, 0 = Don't display debug info
+static constexpr bool DEBUG_INFO = true; // true = Display debug info, false = Don't display debug info
 
 extern std::ofstream logFile;
 

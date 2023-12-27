@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <type_traits>
+#include <array>
 
 class MutableTexture;
 class Canvas;
@@ -142,14 +143,17 @@ class MutableTexture{
     void SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Color &color);
 
     //If the surface is modified, the texture won't be modified unless specified with a call to 'UpdateTexture' with a specified rect
+    //The chosen layer is clamped between 0 and the amount of layers minus 1
+    SDL_Surface *GetSurfaceAtLayer(int layer);
+    //If the surface is modified, the texture won't be modified unless specified with a call to 'UpdateTexture' with a specified rect
     SDL_Surface *GetCurrentSurface();
 
     //Updates the texture, applying all the changes made since the last call. Must be called outside the class
     void UpdateTexture();
     void UpdateTexture(const SDL_Rect &rect);
 
-    void AddLayer(SDL_Renderer *pRenderer);
-    void DeleteCurrentLayer();
+    void AddLayer();
+    bool DeleteCurrentLayer(); //Returns false if unavble
     
     //Sets the selected layer to the chosen one clamped between 0 and the amount of layers minus 1
     void SetLayer(int nLayer);
@@ -204,6 +208,8 @@ class Canvas{
         COLOR_PICKER = 2
     };
 
+    static int maxAmountOfUndoActionsSaved; //This is only used in Canvas creation
+
     SDL_Color toolPreviewMainColor = {0, 0, 0, SDL_ALPHA_OPAQUE};
     SDL_Color toolPreviewAlternateColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
 
@@ -242,6 +248,9 @@ class Canvas{
     void AppendCommand(const std::string &nCommand);
     std::string GiveCommands();
 
+    void Undo();
+    void Redo();
+
     void HandleEvent(SDL_Event *event);
 
     void Update(float deltaTime);
@@ -255,6 +264,10 @@ class Canvas{
     int GetResolution();
     SDL_Point GetImageSize();
     SDL_Point GetGlobalPosition();
+
+    void AddLayer(); //Makes sure the canvas isn't being drawn on and calls AddLayer method on the MutableTexture and saves this change to the undo chain
+    void DeleteCurrentLayer(); //Makes sure the canvas isn't being drawn on and calls DeleteCurrentLayer method on the MutableTexture and saves this change to the undo chain
+    void SetLayer(int nLayer); //Makes sure the canvas isn't being drawn on and calls SetLayer method on the MutableTexture
     MutableTexture *GetImage();
 
     template <typename T>
@@ -327,6 +340,63 @@ class Canvas{
 
         Canvas *mpOwner;
     } mDisplayingHolder;
+
+    class ActionsManager{
+        public:
+
+        enum class Action{
+            NONE,
+            STROKE,
+            LAYER_CREATION,
+            LAYER_DESTRUCTION
+        };
+
+        std::vector<SDL_Point> pointTracker; //Used externally to help calculate change area
+
+        void Initialize(int nMaxUndoActions);
+
+        void SetOriginalLayer(SDL_Surface *pSurfaceToCopy, int surfaceLayer);
+        void SetChange(SDL_Rect affectedRegion, SDL_Surface *pResultingSurface);
+        void ClearData(); //Goes back to the initial state, except for the value of mMaxActionsAmount
+        
+        void SetLayerCreation(); //It's assumed that the layer created is the one passed to SetOriginalLayer
+        void SetLayerDestruction(); //It's assumed that the layer destructed is the one passed to SetOriginalLayer
+
+        int GetUndoLayer(); //Retrieves the layer where the undo (indicated by 'mActionIndex') is expected to be performed
+        Action GetUndoType(); //Retrieves what action will be undone next
+        bool UndoChange(SDL_Surface *pSurfaceToUndo, SDL_Rect *undoneRegion = nullptr); //Returns true if the change was undone
+        
+        int GetRedoLayer(); //Retrieves the layer where the redo (indicated by 'mActionIndex+1') is expected to be performed
+        Action GetRedoType(); //Retrieves what action will be redone next
+        bool RedoChange(SDL_Surface *pSurfaceToRedo, SDL_Rect *redoneRegion = nullptr); //Returns true if the change was redone
+
+        private:
+
+        struct LayeredRect{
+            SDL_Rect rect;
+            int layer;
+        };
+
+        int mMaxActionsAmount = -1;
+
+        //Indicates the position of the last change recorded, or -1 if none
+        int mActionIndex = -1;
+
+        //Refers to the amount of actions set
+        int mCurrentMaxIndex = -1;
+
+        //Set to a copy of the original layer before applying a change that will be saved, so we can record the initial state
+        std::unique_ptr<SDL_Surface, PointerDeleter> mpOriginalLayer;
+        //We store the layer of the original surface for commodity. If the surface changes, this may also
+        int mOriginalLayer = -1;
+
+        //Despite all of these being vectors, their sizes should only be set in the method 'Initialize()'. Therefore, methods like push_back or emplace_back musn't be used
+        std::vector<LayeredRect> mChangedRects;
+        std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mInitialSurface;
+        std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mEndingSurface;
+
+        void RotateUndoHistoryIfFull();
+    } mActionsManager;
 
     void UpdateRealPosition(){mRealPosition = {(float)mDimensions.x, (float)mDimensions.y};}
 };

@@ -468,7 +468,7 @@ void ColorPicker::GrabColor(Canvas *pCanvas, MutableTexture *pTexture, SDL_Point
 							 << std::setw(2) << std::setfill('0') << ((unsigned int)color.g)
 							 << std::setw(2) << std::setfill('0') << ((unsigned int)color.b);
 							 
-		pCanvas->AppendCommand("0_H_InitialValue/"+hexColor.str()+"_");
+		pCanvas->AppendCommand("0_H_InitialValue/"+hexColor.str()+"_"); //Refers to the DRAWING_COLOR hex field
 	}
 }
     
@@ -600,6 +600,10 @@ void MutableTexture::SetPixelsUnsafe(std::span<SDL_Point> pixels, const SDL_Colo
 	mChangedPixels.insert(mChangedPixels.end(), pixels.begin(), pixels.end());
 }
 
+SDL_Surface *MutableTexture::GetSurfaceAtLayer(int layer){
+	return mpSurfaces[std::clamp(layer, 0, (int)(mpSurfaces.size()-1))].get();
+}
+
 SDL_Surface *MutableTexture::GetCurrentSurface(){
 	return mpSurfaces[mSelectedLayer].get();
 }
@@ -630,7 +634,7 @@ void MutableTexture::UpdateTexture(const SDL_Rect &rect){
 	SDL_UnlockTexture(mpTexture.get());
 }
 
-void MutableTexture::AddLayer(SDL_Renderer *pRenderer){
+void MutableTexture::AddLayer(){
 	mpSurfaces.emplace(mpSurfaces.begin()+mSelectedLayer+1, SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
     mSelectedLayer++;
 
@@ -641,19 +645,21 @@ void MutableTexture::AddLayer(SDL_Renderer *pRenderer){
 	UpdateWholeTexture();
 }
 
-void MutableTexture::DeleteCurrentLayer(){
+bool MutableTexture::DeleteCurrentLayer(){
 	if(mpSurfaces.size() == 1){
 		DebugPrint("Can't delete current layer, as it is the last one left");
-		return;
+		return false;
 	}
 
 	//Better safe than sorry
-	mSelectedLayer = std::clamp(mSelectedLayer, 0, (int)mpSurfaces.size()-1);
+	mSelectedLayer = std::clamp(mSelectedLayer, 0, (int)(mpSurfaces.size()-1));
 
 	mpSurfaces.erase(mpSurfaces.begin() + mSelectedLayer);
 	
 	UpdateWholeTexture();
 	if(mSelectedLayer != 0) mSelectedLayer--;
+
+	return true;
 }
 
 void MutableTexture::SetLayer(int nLayer){
@@ -729,15 +735,20 @@ SDL_Rect MutableTexture::GetChangesRect(){
 	return {smallestX, smallestY, 1+biggestX-smallestX, 1+biggestY-smallestY};
 }
 
-//SURFACE CANVAS METHODS:
+
+
+int Canvas::maxAmountOfUndoActionsSaved = 0;
+//CANVAS METHODS:
 
 Canvas::Canvas(SDL_Renderer *pRenderer, int nWidth, int nHeight) : mpImage(new MutableTexture(pRenderer, nWidth, nHeight)), mDisplayingHolder(this){
+	mActionsManager.Initialize(Canvas::maxAmountOfUndoActionsSaved);
 	mDimensions = {0, 0, nWidth, nHeight};
 	mDisplayingHolder.Update();
 	UpdateRealPosition();
 }
 
 Canvas::Canvas(SDL_Renderer *pRenderer, const char *pLoadFile) : mpImage(new MutableTexture(pRenderer, pLoadFile)), mDisplayingHolder(this){
+	mActionsManager.Initialize(Canvas::maxAmountOfUndoActionsSaved);
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
 	mDisplayingHolder.Update();
 	UpdateRealPosition();
@@ -749,6 +760,7 @@ Canvas::~Canvas(){
 
 void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 	mpImage.reset(new MutableTexture(pRenderer, nWidth, nHeight));
+	mActionsManager.ClearData();
 	mDimensions = {0, 0, nWidth, nHeight};
 	mDisplayingHolder.Update();
 	UpdateRealPosition();
@@ -756,6 +768,7 @@ void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 
 void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
 	mpImage.reset(new MutableTexture(pRenderer, pLoadFile));
+	mActionsManager.ClearData();
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
 	mDisplayingHolder.Update();
 	UpdateRealPosition();
@@ -806,6 +819,7 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 	}
 
 	mLastMousePixel = localPixel;
+	mActionsManager.pointTracker.push_back(mLastMousePixel);
 }
 
 void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
@@ -832,14 +846,19 @@ void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
 	}
 
     mLastMousePixel = localPixels.back();
+	mActionsManager.pointTracker.push_back(mLastMousePixel);
 }
 
 void Canvas::Clear(std::optional<SDL_Color> clearColor){
+	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+	
 	if (clearColor.has_value()) {
 		mpImage->Clear(clearColor.value());
 	} else {
 		mpImage->Clear(mDrawColor);
 	}
+	
+	mActionsManager.SetChange(SDL_Rect{0, 0, 100,  100}, mpImage->GetCurrentSurface());
 }
 
 void Canvas::SetSavePath(const char *nSavePath){
@@ -914,9 +933,115 @@ void Canvas::AppendCommand(const std::string &nCommand){
 }
 
 std::string Canvas::GiveCommands(){
-	std::string mCopy(mCommands);
+	std::string sCopy(mCommands);
 	mCommands.clear();
-	return mCopy;
+	return sCopy;
+}
+
+void Canvas::Undo(){
+	//We don't want to undo anything if the user is drawing
+	if(mHolded) return;
+
+	int neededLayer = mActionsManager.GetUndoLayer();
+	SDL_Rect affectedRect = {-1,-1,-1,-1};
+
+	switch(mActionsManager.GetUndoType()){
+		case ActionsManager::Action::STROKE:
+			//We undo the changes, making sure that something actually changed
+			if(mActionsManager.UndoChange(mpImage->GetSurfaceAtLayer(neededLayer), &affectedRect)){
+				//If the layer changed is not from the current one, we set it
+				if(mpImage->GetLayer() != neededLayer){
+					mpImage->SetLayer(neededLayer);
+					AppendCommand("52_S_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+				}
+				
+				//Finally we update the texture as needed
+				mpImage->UpdateTexture(affectedRect);
+			}
+			break;
+		
+		case ActionsManager::Action::LAYER_CREATION:
+			//First, we make sure to select the layer, and then delete it
+			if(mpImage->GetLayer() != neededLayer){
+				mpImage->SetLayer(neededLayer);
+			}
+
+			mpImage->DeleteCurrentLayer();
+			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+
+			mActionsManager.UndoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
+			//We don't need to update the texture, since DeleteCurrentLayer already does it
+			break;
+
+		case ActionsManager::Action::LAYER_DESTRUCTION:
+			//First, we make sure to select the previous layer, and then add a layer on top of it
+			if(mpImage->GetLayer() != neededLayer-1){
+				mpImage->SetLayer(neededLayer-1);
+			}
+
+			mpImage->AddLayer();
+			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+
+
+			//Finally we set the surface to the deleted one
+			mActionsManager.UndoChange(mpImage->GetCurrentSurface(), &affectedRect);
+			//We need to update the texture since, even though AddLayer already does it, we then apply the changes of the destroyed layer
+			mpImage->UpdateTexture(affectedRect);
+			break;
+	}
+}
+
+void Canvas::Redo(){
+	//We don't want to redo anything if the user is drawing
+	if(mHolded) return;
+
+	int neededLayer = mActionsManager.GetRedoLayer();
+	SDL_Rect affectedRect = {-1,-1,-1,-1};
+
+	switch(mActionsManager.GetRedoType()){
+		case ActionsManager::Action::STROKE:
+			//We undo the changes, making sure that something actually changed
+			if(mActionsManager.RedoChange(mpImage->GetSurfaceAtLayer(neededLayer), &affectedRect)){
+				//If the layer changed is not from the current one, we set it
+				if(mpImage->GetLayer() != neededLayer){
+					mpImage->SetLayer(neededLayer);
+					AppendCommand("52_S_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+				}
+				
+				//Finally we update the texture as needed
+				mpImage->UpdateTexture(affectedRect);
+			}
+			break;
+
+		case ActionsManager::Action::LAYER_CREATION:
+			//First, we make sure to select the previous layer, and then add a layer on top of it
+			if(mpImage->GetLayer() != neededLayer-1){
+				mpImage->SetLayer(neededLayer-1);
+			}
+
+			mpImage->AddLayer();
+			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+
+
+			//Finally we redo the surface
+			mActionsManager.RedoChange(mpImage->GetCurrentSurface(), &affectedRect);
+			//We need to update the texture since, even though AddLayer already does it, we then apply the changes of the layer
+			mpImage->UpdateTexture(affectedRect);
+			break;
+		
+		case ActionsManager::Action::LAYER_DESTRUCTION:
+			//First, we make sure to select the layer, and then delete it
+			if(mpImage->GetLayer() != neededLayer){
+				mpImage->SetLayer(neededLayer);
+			}
+
+			mpImage->DeleteCurrentLayer();
+			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+
+			mActionsManager.RedoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
+			//We don't need to update the texture, since DeleteCurrentLayer already does it
+			break;
+	}
 }
 
 void Canvas::HandleEvent(SDL_Event *event){
@@ -929,7 +1054,10 @@ void Canvas::HandleEvent(SDL_Event *event){
 
 		switch(mUsedTool){
 			case Tool::DRAW_TOOL: case Tool::ERASE_TOOL:
+				mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+
 				DrawPixel(pixel);
+				
 				mHolded = true;
 				break;
 
@@ -983,6 +1111,24 @@ void Canvas::HandleEvent(SDL_Event *event){
 	}
 	else if (event->type == SDL_MOUSEBUTTONUP){
 		mHolded = false;
+		
+		if(mActionsManager.pointTracker.size() != 0){
+			SDL_Rect enclosingRect = {-1,-1,-1,-1}, affectedRect;
+			SDL_EnclosePoints(mActionsManager.pointTracker.data(), mActionsManager.pointTracker.size(), nullptr, &enclosingRect);
+			
+			int radius = GetRadius();
+
+			affectedRect.x = std::max(enclosingRect.x+1-radius, 0);
+			affectedRect.y = std::max(enclosingRect.y+1-radius, 0);
+			//To the width and heigth, we substract the offset of the x and y, so, for example, if 2 rows of pixels fell above the canvas, the height should be reduced by 2
+			affectedRect.w = std::min(enclosingRect.w+1+radius - (affectedRect.x - enclosingRect.x+1-radius), mpImage->GetWidth());
+			affectedRect.h = std::min(enclosingRect.h+1+radius - (affectedRect.y - enclosingRect.y+1-radius), mpImage->GetHeight());
+			
+			mActionsManager.pointTracker.clear();
+
+			//We make sure there is actually some change to apply
+			if(affectedRect.w > 0 && affectedRect.h > 0) mActionsManager.SetChange(affectedRect, mpImage->GetCurrentSurface());
+		}
 	}
 	else if(event->type == SDL_KEYDOWN){
 		//We don't want to handle a key down if the text input is active, because that means a textfield is using the input
@@ -996,6 +1142,8 @@ void Canvas::HandleEvent(SDL_Event *event){
 			case SDLK_s: mCanvasMovement |= Movement::UP; break;
 			case SDLK_e: SetResolution(mResolution+10.0f*M_MIN_RESOLUTION); break;
 			case SDLK_q: SetResolution(mResolution-10.0f*M_MIN_RESOLUTION); break;
+			case SDLK_0: Undo(); break;
+			case SDLK_9: Redo(); break;
 		}
 	}
 	else if (event->type == SDL_KEYUP){
@@ -1071,7 +1219,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 	bool enoughRadius = false;
 	switch(mUsedTool){
 		case Tool::DRAW_TOOL: case Tool::ERASE_TOOL:
-			enoughRadius =GetRadius() > 4;
+			enoughRadius = GetRadius() > 4;
 			break;
 		case Tool::COLOR_PICKER:
 			enoughRadius = true;
@@ -1157,6 +1305,33 @@ SDL_Point Canvas::GetGlobalPosition(){
 	return {mDimensions.x+viewport.x, mDimensions.y+viewport.y};
 }
 
+void Canvas::AddLayer(){
+	if(mHolded) return; //We don't want to change the current layer if its being used
+
+	mpImage->AddLayer();
+
+	//We can use GetCurrentSurface and GetLayer, since AddLayer also changes the current layer to the one just created
+	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+	mActionsManager.SetLayerCreation();
+}
+
+void Canvas::DeleteCurrentLayer(){
+	if(mHolded) return; //We don't want the current layer to get deleted if its being used
+
+	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+
+	//We need to make sure that the current layer can be deleted, otherwise we would be adding an event that really didn't ocurr
+	if(mpImage->DeleteCurrentLayer()){
+		mActionsManager.SetLayerDestruction();
+	}
+}
+
+void Canvas::SetLayer(int nLayer){
+	if(mHolded) return; //We don't want to change the current layer if its being used
+
+	mpImage->SetLayer(nLayer);
+}
+
 MutableTexture *Canvas::GetImage(){
 	return mpImage.get();
 }
@@ -1199,5 +1374,189 @@ void Canvas::DisplayingHolder::Update(){
 			squareRect.y += SQUARE_SIZE;
 		}
 		index++; //Causes the greys to alternate
+	}
+}
+
+//ACTIONS MANAGER METHODS:
+
+void Canvas::ActionsManager::Initialize(int nMaxUndoActions){
+	mMaxActionsAmount = std::max(nMaxUndoActions, 0);
+	mChangedRects.resize(nMaxUndoActions);
+	mInitialSurface.resize(nMaxUndoActions);
+	mEndingSurface.resize(nMaxUndoActions);
+}
+
+void Canvas::ActionsManager::SetOriginalLayer(SDL_Surface *pSurfaceToCopy, int surfaceLayer){
+	mpOriginalLayer.reset(SDL_ConvertSurface(pSurfaceToCopy, pSurfaceToCopy->format, 0));
+	mOriginalLayer = surfaceLayer;
+}
+
+void Canvas::ActionsManager::SetChange(SDL_Rect affectedRegion, SDL_Surface *pResultingSurface){
+	RotateUndoHistoryIfFull();
+
+	mActionIndex++;
+	mCurrentMaxIndex = mActionIndex;
+	mChangedRects[mActionIndex] = {affectedRegion, mOriginalLayer};
+
+	//Despite the formats coming from different sources, it's assumed that both are the same
+	mInitialSurface[mActionIndex].reset(SDL_CreateRGBSurfaceWithFormat(0, affectedRegion.w, affectedRegion.h, 0, mpOriginalLayer->format->format));
+	mEndingSurface[mActionIndex].reset(SDL_CreateRGBSurfaceWithFormat(0, affectedRegion.w, affectedRegion.h, 0, pResultingSurface->format->format));
+
+	SDL_SetSurfaceBlendMode(mpOriginalLayer.get(), SDL_BLENDMODE_NONE);
+	SDL_BlitSurface(mpOriginalLayer.get(), &affectedRegion, mInitialSurface[mActionIndex].get(), nullptr);
+
+	SDL_BlendMode resultingBlendMode;
+	SDL_GetSurfaceBlendMode(pResultingSurface, &resultingBlendMode);	
+
+	SDL_SetSurfaceBlendMode(pResultingSurface, SDL_BLENDMODE_NONE);
+	SDL_BlitSurface(pResultingSurface, &affectedRegion, mEndingSurface[mActionIndex].get(), nullptr);
+	SDL_SetSurfaceBlendMode(pResultingSurface, resultingBlendMode);
+
+	//This is done preemtively, in case of any future undo/redo
+	SDL_SetSurfaceBlendMode(mInitialSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
+	SDL_SetSurfaceBlendMode(mEndingSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
+}
+
+void Canvas::ActionsManager::ClearData(){
+	pointTracker.clear();
+	mActionIndex = -1;
+	mCurrentMaxIndex = -1;
+	mpOriginalLayer.reset();
+	mOriginalLayer = -1;
+	mChangedRects.clear(); mChangedRects.resize(mMaxActionsAmount);
+	mInitialSurface.clear(); mInitialSurface.resize(mMaxActionsAmount);
+	mEndingSurface.clear(); mEndingSurface.resize(mMaxActionsAmount);
+}
+
+void Canvas::ActionsManager::SetLayerCreation(){
+	RotateUndoHistoryIfFull();
+	
+	mActionIndex++;
+	mCurrentMaxIndex = mActionIndex;
+	mChangedRects[mActionIndex] = {{0, 0, mpOriginalLayer->w, mpOriginalLayer->h}, mOriginalLayer};
+	mInitialSurface[mActionIndex].reset(nullptr);
+	mEndingSurface[mActionIndex].reset(SDL_ConvertSurface(mpOriginalLayer.get(), mpOriginalLayer->format, 0));
+	
+	SDL_SetSurfaceBlendMode(mEndingSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
+}
+
+void Canvas::ActionsManager::SetLayerDestruction(){
+	RotateUndoHistoryIfFull();
+	
+	mActionIndex++;
+	mCurrentMaxIndex = mActionIndex;
+	mChangedRects[mActionIndex] = {{0, 0, mpOriginalLayer->w, mpOriginalLayer->h}, mOriginalLayer};
+	mInitialSurface[mActionIndex].reset(SDL_ConvertSurface(mpOriginalLayer.get(), mpOriginalLayer->format, 0));
+	mEndingSurface[mActionIndex].reset(nullptr);
+	
+	SDL_SetSurfaceBlendMode(mInitialSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
+}
+
+int Canvas::ActionsManager::GetUndoLayer(){
+	return mChangedRects[mActionIndex].layer;
+}
+
+Canvas::ActionsManager::Action Canvas::ActionsManager::GetUndoType(){
+	if(mActionIndex == -1){
+		return Action::NONE;
+	}
+
+	if(mInitialSurface[mActionIndex].get() == nullptr){
+		return Action::LAYER_CREATION;
+	}
+	if(mEndingSurface[mActionIndex].get() == nullptr){
+		return Action::LAYER_DESTRUCTION;
+	}
+
+	return Action::STROKE;
+}
+
+bool Canvas::ActionsManager::UndoChange(SDL_Surface *pSurfaceToUndo, SDL_Rect *undoneRegion){
+	if(mActionIndex == -1) return false;
+
+	if(undoneRegion != nullptr){
+		*undoneRegion = mChangedRects[mActionIndex].rect;
+	}
+
+	switch(GetUndoType()){
+		case Action::STROKE:
+			SDL_BlitSurface(mInitialSurface[mActionIndex].get(), nullptr, pSurfaceToUndo, &mChangedRects[mActionIndex].rect);
+			mActionIndex--;
+			return true;
+		
+		case Action::LAYER_CREATION: 
+			//Undoing the creation of layers should be managed on the user end, using GetUndoType before calling this method
+			mActionIndex--;
+			return true;
+
+		case Action::LAYER_DESTRUCTION:
+			//It's assumed that 'pSurfaceToUndo' points to a new surface, corresponding to the layer that was destroyed
+			SDL_BlitSurface(mInitialSurface[mActionIndex].get(), nullptr, pSurfaceToUndo, &mChangedRects[mActionIndex].rect);
+			mActionIndex--;
+			return true;
+		
+		case Action::NONE: default: return false;
+	}
+}
+
+
+int Canvas::ActionsManager::GetRedoLayer(){
+	return mChangedRects[mActionIndex+1].layer;
+}
+
+Canvas::ActionsManager::Action Canvas::ActionsManager::GetRedoType(){
+	if(mActionIndex == mCurrentMaxIndex){
+		return Action::NONE;
+	}
+
+	if(mInitialSurface[mActionIndex+1].get() == nullptr){
+		return Action::LAYER_CREATION;
+	}
+	if(mEndingSurface[mActionIndex+1].get() == nullptr){
+		return Action::LAYER_DESTRUCTION;
+	}
+
+	return Action::STROKE;
+}
+
+bool Canvas::ActionsManager::RedoChange(SDL_Surface *pSurfaceToRedo, SDL_Rect *redoneRegion){
+	if(mActionIndex == mCurrentMaxIndex) return false;
+
+	if(redoneRegion != nullptr){
+		*redoneRegion = mChangedRects[mActionIndex+1].rect;
+	}
+
+	switch(GetRedoType()){
+		case Action::STROKE:
+			SDL_BlitSurface(mEndingSurface[mActionIndex+1].get(), nullptr, pSurfaceToRedo, &mChangedRects[mActionIndex+1].rect);
+			mActionIndex++;
+			return true;
+		
+		case Action::LAYER_CREATION: 
+			//It's assumed that 'pSurfaceToRedo' points to a new surface, corresponding to the layer that needs to be created
+			SDL_BlitSurface(mEndingSurface[mActionIndex+1].get(), nullptr, pSurfaceToRedo, &mChangedRects[mActionIndex+1].rect);
+			mActionIndex++;
+			return true;
+
+		case Action::LAYER_DESTRUCTION:
+			//The destruction of layers should be managed on the user end, using GetRedoType before calling this method
+			mActionIndex++;
+			return true;
+		
+		case Action::NONE: default: return false;
+	}
+}
+
+void Canvas::ActionsManager::RotateUndoHistoryIfFull(){
+	if(mActionIndex+1 >= mMaxActionsAmount){
+		DebugPrint("Undo shifting");
+
+		//We rotate everything one to the left, putting the oldest action to the front
+		std::rotate(mChangedRects.begin(), mChangedRects.begin()+1, mChangedRects.end());
+		std::rotate(mInitialSurface.begin(), mInitialSurface.begin()+1, mInitialSurface.end());
+		std::rotate(mEndingSurface.begin(), mEndingSurface.begin()+1, mEndingSurface.end());
+
+		//Then, we lower 'mActionIndex', resulting in the overwrite of the oldest action
+		mActionIndex--;
 	}
 }

@@ -8,5 +8,8 @@ W:1500
 #The maximum value for the height of the canvas
 H:1500
 
+#The amount of undo operations the program is allowed to save at the same time
+U:50
+
 #This is the image the program will open upon start
 #I:Test.png

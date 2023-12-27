@@ -1230,6 +1230,8 @@ void Option::OptionCommands::SetInitialValue(Option *pOption, std::string_view n
 			pOption->input.mpTickButton->SetValue(nValue.size() == 1 && nValue[0] == 'T');
 			break;
 		case Option::InputMethod::ACTION:
+			//This would activate the action button if the value is 'T'
+			//pOption->mModified = (nValue.size() == 1 && nValue[0] == 'T');
 			DebugPrint("Input method ACTION can't have an initial value nor a value in general");
 			break;
 		default:
