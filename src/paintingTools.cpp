@@ -353,30 +353,39 @@ void Pencil::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 std::function<Uint8(const SDL_Point& center, const SDL_Point& position)> Pencil::GetPixelAlphaCalculation(){
 	if(mPencilType ==  PencilType::HARD){
 		return [](const SDL_Point& center, const SDL_Point& position) -> Uint8 {return SDL_ALPHA_OPAQUE;};
+
 	} else if(mPencilType ==  PencilType::SOFT){
-		//TODO: modify hardness system (mHardness = 1 doesn't make all the pixels fsully opaque (and (mRadius+1)*mHardness is a bit of an overkill))
 		AlphaCalculation alphaCalculation = mAlphaCalculation;
 		float hardness = mHardness;
 
 		return [alphaCalculation, hardness](const SDL_Point& center, const SDL_Point& position) ->Uint8{
 			float centerDistance = sqrt(pow(position.x-center.x, 2) + pow(position.y-center.y, 2));
-			float maxDistance = tool_circle_data::radius*hardness;
+			float maxDistance = (tool_circle_data::radius+0.5f);
 			Uint8 alpha;
 			
-			if(centerDistance <= maxDistance){
-				alpha = SDL_ALPHA_OPAQUE;
+			if(centerDistance > maxDistance){
+				alpha = SDL_ALPHA_TRANSPARENT;
 			}
 			else switch(alphaCalculation){
 				case AlphaCalculation::LINEAR: 
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-((centerDistance-maxDistance)/(1+tool_circle_data::radius-maxDistance))));
+					alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * (1-centerDistance/maxDistance), 1.0f));
 					break;
 				case AlphaCalculation::QUADRATIC:
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * (1-pow((centerDistance-maxDistance)/(1+tool_circle_data::radius-maxDistance), 2)));
+					alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * (1-powf(centerDistance/maxDistance, 2)), 1.0f));
 					break;
 				case AlphaCalculation::EXPONENTIAL:
-					alpha = (Uint8)(SDL_ALPHA_OPAQUE * exp(-6*(centerDistance-maxDistance)/(1+tool_circle_data::radius-maxDistance)));
+					alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * (exp(-centerDistance/maxDistance)), 1.0f));
 					break;
 			}
+
+			/*
+			POTENTIAL FUTURE ALPHA CALCULATIONS:
+			LOGARITHMIC : alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * (1-std::log(1+centerDistance/maxDistance)), 1.0f));
+			HYPERBOLIC : alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * std::tanh(centerDistance/maxDistance), 1.0f));
+			INVERSE HYPERBOLIC : alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * std::atanh(centerDistance/maxDistance), 1.0f));
+			SQUARE ROOT : alpha = (Uint8)(SDL_ALPHA_OPAQUE * std::min(hardness*2.0f * std::sqrt(centerDistance/maxDistance), 1.0f));
+			*/
+
 			return alpha;
 		};
 	}
@@ -537,6 +546,11 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
 
 		SDL_Color auxiliar;
 		SDL_GetRGBA(*UnsafeGetPixel(pixel, i), mpSurfaces[i]->format, &auxiliar.r, &auxiliar.g, &auxiliar.b, &auxiliar.a);
+				
+		Uint8 nAlpha = 0;
+		SDL_GetSurfaceAlphaMod(mpSurfaces[i].get(), &nAlpha);
+		auxiliar.a = (Uint8)((nAlpha/255.0f) * auxiliar.a); //We apply the alpha mod
+		
 		ApplyColorToColor(pixelColor, auxiliar);
 	}
 	return pixelColor;
@@ -683,6 +697,18 @@ bool MutableTexture::GetLayerVisibility(){
 	return mShowSurface[mSelectedLayer];
 }
 
+void MutableTexture::SetLayerAlpha(Uint8 alpha){
+	SDL_SetSurfaceAlphaMod(mpSurfaces[mSelectedLayer].get(), alpha);
+
+	UpdateWholeTexture();
+}
+
+Uint8 MutableTexture::GetLayerAlpha(){
+	Uint8 nAlpha = 0;
+	SDL_GetSurfaceAlphaMod(mpSurfaces[mSelectedLayer].get(), &nAlpha);
+	return nAlpha;
+}
+
 void MutableTexture::SetLayer(int nLayer){
 	nLayer = std::clamp(nLayer, 0, (int)mpSurfaces.size()-1);
 	mSelectedLayer = nLayer;
@@ -805,7 +831,7 @@ int Canvas::GetRadius(){
 }
 
 void Canvas::DrawPixel(SDL_Point localPixel){
-	SDL_Rect usedArea{0, 0, 0, 0}, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	SDL_Rect usedArea{0, 0, 0, 0};
 
 	std::vector<SDL_Point> pixels{localPixel};
 	switch(mUsedTool){
@@ -816,7 +842,7 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 			mEraser.ApplyOn(pixels, mpImage->GetCurrentSurface(), &usedArea);
 			break;
 		default:
-			ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 			break;
 	}
 
@@ -829,7 +855,7 @@ void Canvas::DrawPixel(SDL_Point localPixel){
 }
 
 void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
-	SDL_Rect usedArea{0, 0, 0, 0}, imageRect = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
+	SDL_Rect usedArea{0, 0, 0, 0};
 	
 	std::vector<SDL_Point> pixels(localPixels);
 	switch(mUsedTool){
@@ -893,7 +919,7 @@ void Canvas::SetResolution(float nResolution){
 			mColorPicker.SetResolution(mResolution);
 			break;
 		default:
-			ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 			break;
 	}
 
@@ -927,7 +953,7 @@ void Canvas::SetTool(Tool nUsedTool){
 			AppendCommand(ReadFileToString("InternalData/ToolWindowColorpicker.txt"));
 			break;
 		default:
-			ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 			mUsedTool = Tool::DRAW_TOOL;
 			mPencil.Activate(); 
 			break;
@@ -974,8 +1000,7 @@ void Canvas::Undo(){
 
 			mpImage->DeleteCurrentLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
-
+			
 			mActionsManager.UndoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
 			//We don't need to update the texture, since DeleteCurrentLayer already does it
 			break;
@@ -988,14 +1013,16 @@ void Canvas::Undo(){
 
 			mpImage->AddLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			//Finally we set the surface to the deleted one
 			mActionsManager.UndoChange(mpImage->GetCurrentSurface(), &affectedRect);
 			//We need to update the texture since, even though AddLayer already does it, we then apply the changes of the destroyed layer
 			mpImage->UpdateTexture(affectedRect);
 			break;
+			
+		default: break;
 	}
+	UpdateLayerOptions();
 }
 
 void Canvas::Redo(){
@@ -1028,7 +1055,6 @@ void Canvas::Redo(){
 
 			mpImage->AddLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			//Finally we redo the surface
 			mActionsManager.RedoChange(mpImage->GetCurrentSurface(), &affectedRect);
@@ -1044,12 +1070,14 @@ void Canvas::Redo(){
 
 			mpImage->DeleteCurrentLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			mActionsManager.RedoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
 			//We don't need to update the texture, since DeleteCurrentLayer already does it
 			break;
+
+		default: break;
 	}
+	UpdateLayerOptions();
 }
 
 void Canvas::HandleEvent(SDL_Event *event){
@@ -1074,7 +1102,7 @@ void Canvas::HandleEvent(SDL_Event *event){
 				break;
 
 			default:
-				ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+				ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 				break;
 		}
 	}
@@ -1102,7 +1130,7 @@ void Canvas::HandleEvent(SDL_Event *event){
 					break;
 
 				default:
-					ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+					ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 					break;
 			}
 		} else {
@@ -1112,7 +1140,7 @@ void Canvas::HandleEvent(SDL_Event *event){
 					break;
 
 				default:
-					ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+					ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 					break;
 			}
 		}
@@ -1233,7 +1261,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 			enoughRadius = true;
 			break;
 		default:
-			ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 			enoughRadius = false;
 			break;
 	}
@@ -1274,7 +1302,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 				mColorPicker.DrawPreview(mouseToCanvas, pRenderer, previewColor);
 				break;
 			default:
-				ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
+				ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 				break;
 		};
 	}
@@ -1322,7 +1350,7 @@ void Canvas::AddLayer(){
 	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
 	mActionsManager.SetLayerCreation();
 	
-	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
+	UpdateLayerOptions();
 }
 
 void Canvas::DeleteCurrentLayer(){
@@ -1335,21 +1363,27 @@ void Canvas::DeleteCurrentLayer(){
 		mActionsManager.SetLayerDestruction();
 	}
 
-	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
+	UpdateLayerOptions();
 }
 
 void Canvas::SetLayer(int nLayer){
 	if(mHolded) return; //We don't want to change the current layer if its being used
 
 	mpImage->SetLayer(nLayer);
-	
-	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
+
+	UpdateLayerOptions();
 }
 
 void Canvas::SetLayerVisibility(bool visible){
 	if(mHolded) return; //We don't want to make the current layer visible or hiden
 
 	mpImage->SetLayerVisibility(visible);
+}
+
+void Canvas::SetLayerAlpha(Uint8 alpha){
+	if(mHolded) return; //We don't want to make the current layer visible or hiden
+
+	mpImage->SetLayerAlpha(alpha);
 }
 
 MutableTexture *Canvas::GetImage(){
@@ -1422,19 +1456,39 @@ void Canvas::ActionsManager::SetChange(SDL_Rect affectedRegion, SDL_Surface *pRe
 	mInitialSurface[mActionIndex].reset(SDL_CreateRGBSurfaceWithFormat(0, affectedRegion.w, affectedRegion.h, 0, mpOriginalLayer->format->format));
 	mEndingSurface[mActionIndex].reset(SDL_CreateRGBSurfaceWithFormat(0, affectedRegion.w, affectedRegion.h, 0, pResultingSurface->format->format));
 
+	Uint8 initialAlphaMod = 0;
+	Uint8 resultingAlphaMod = 0;
+	SDL_BlendMode resultingBlendMode;
+
+	SDL_GetSurfaceAlphaMod(mpOriginalLayer.get(), &initialAlphaMod);
+	SDL_GetSurfaceAlphaMod(pResultingSurface, &resultingAlphaMod);
+	SDL_GetSurfaceBlendMode(pResultingSurface, &resultingBlendMode);
+
+	SDL_SetSurfaceAlphaMod(mpOriginalLayer.get(), SDL_ALPHA_OPAQUE);
 	SDL_SetSurfaceBlendMode(mpOriginalLayer.get(), SDL_BLENDMODE_NONE);
 	SDL_BlitSurface(mpOriginalLayer.get(), &affectedRegion, mInitialSurface[mActionIndex].get(), nullptr);
+	SDL_SetSurfaceAlphaMod(mpOriginalLayer.get(), initialAlphaMod);
 
-	SDL_BlendMode resultingBlendMode;
-	SDL_GetSurfaceBlendMode(pResultingSurface, &resultingBlendMode);	
-
+	SDL_SetSurfaceAlphaMod(pResultingSurface, SDL_ALPHA_OPAQUE);
 	SDL_SetSurfaceBlendMode(pResultingSurface, SDL_BLENDMODE_NONE);
 	SDL_BlitSurface(pResultingSurface, &affectedRegion, mEndingSurface[mActionIndex].get(), nullptr);
+	SDL_SetSurfaceAlphaMod(pResultingSurface, resultingAlphaMod);
 	SDL_SetSurfaceBlendMode(pResultingSurface, resultingBlendMode);
 
 	//This is done preemtively, in case of any future undo/redo
 	SDL_SetSurfaceBlendMode(mInitialSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
 	SDL_SetSurfaceBlendMode(mEndingSurface[mActionIndex].get(), SDL_BLENDMODE_NONE);
+	SDL_SetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), initialAlphaMod);
+	SDL_SetSurfaceAlphaMod(mEndingSurface[mActionIndex].get(), resultingAlphaMod);
+}
+
+void Canvas::ActionsManager::ClearRedoData(){
+	for(int i = mActionIndex+1; i <= mCurrentMaxIndex; i++){
+		//We don't clear the layered rects since this wouldn't make them take less memory
+		mInitialSurface[i].reset();
+		mEndingSurface[i].reset();
+	}
+	mCurrentMaxIndex = mActionIndex;
 }
 
 void Canvas::ActionsManager::ClearData(){
@@ -1498,9 +1552,17 @@ bool Canvas::ActionsManager::UndoChange(SDL_Surface *pSurfaceToUndo, SDL_Rect *u
 		*undoneRegion = mChangedRects[mActionIndex].rect;
 	}
 
+	Uint8 alphaMod = 0;
+
 	switch(GetUndoType()){
 		case Action::STROKE:
+			SDL_GetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), &alphaMod);
+			SDL_SetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), SDL_ALPHA_OPAQUE);
+
 			SDL_BlitSurface(mInitialSurface[mActionIndex].get(), nullptr, pSurfaceToUndo, &mChangedRects[mActionIndex].rect);
+
+			SDL_SetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), alphaMod);
+			SDL_SetSurfaceAlphaMod(pSurfaceToUndo, alphaMod);
 			mActionIndex--;
 			return true;
 		
@@ -1510,8 +1572,15 @@ bool Canvas::ActionsManager::UndoChange(SDL_Surface *pSurfaceToUndo, SDL_Rect *u
 			return true;
 
 		case Action::LAYER_DESTRUCTION:
+			SDL_GetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), &alphaMod);
+			SDL_SetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), SDL_ALPHA_OPAQUE);
+
 			//It's assumed that 'pSurfaceToUndo' points to a new surface, corresponding to the layer that was destroyed
 			SDL_BlitSurface(mInitialSurface[mActionIndex].get(), nullptr, pSurfaceToUndo, &mChangedRects[mActionIndex].rect);
+			
+			SDL_SetSurfaceAlphaMod(mInitialSurface[mActionIndex].get(), alphaMod);
+			SDL_SetSurfaceAlphaMod(pSurfaceToUndo, alphaMod);
+			
 			mActionIndex--;
 			return true;
 		
@@ -1546,15 +1615,29 @@ bool Canvas::ActionsManager::RedoChange(SDL_Surface *pSurfaceToRedo, SDL_Rect *r
 		*redoneRegion = mChangedRects[mActionIndex+1].rect;
 	}
 
+	Uint8 alphaMod = 0;
+
 	switch(GetRedoType()){
 		case Action::STROKE:
+			SDL_GetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), &alphaMod);
+			SDL_SetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), SDL_ALPHA_OPAQUE);
+
 			SDL_BlitSurface(mEndingSurface[mActionIndex+1].get(), nullptr, pSurfaceToRedo, &mChangedRects[mActionIndex+1].rect);
+			
+			SDL_SetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), alphaMod);
+			SDL_SetSurfaceAlphaMod(pSurfaceToRedo, alphaMod);
 			mActionIndex++;
 			return true;
 		
 		case Action::LAYER_CREATION: 
+			SDL_GetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), &alphaMod);
+			SDL_SetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), SDL_ALPHA_OPAQUE);
+
 			//It's assumed that 'pSurfaceToRedo' points to a new surface, corresponding to the layer that needs to be created
 			SDL_BlitSurface(mEndingSurface[mActionIndex+1].get(), nullptr, pSurfaceToRedo, &mChangedRects[mActionIndex+1].rect);
+			
+			SDL_SetSurfaceAlphaMod(mEndingSurface[mActionIndex+1].get(), alphaMod);
+			SDL_SetSurfaceAlphaMod(pSurfaceToRedo, alphaMod);;
 			mActionIndex++;
 			return true;
 
@@ -1577,4 +1660,9 @@ void Canvas::ActionsManager::RotateUndoHistoryIfFull(){
 		//Then, we lower 'mActionIndex', resulting in the overwrite of the oldest action
 		mActionIndex--;
 	}
+}
+
+void Canvas::UpdateLayerOptions(){
+	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
+	AppendCommand("54_S_InitialValue/"+std::to_string(mpImage->GetLayerAlpha())+"_"); //Refers to the slider LAYER_ALPHA
 }

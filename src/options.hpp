@@ -305,6 +305,7 @@ struct OptionInfo{
         REMOVE_CURRENT_LAYER = 51,
         SELECT_LAYER = 52,
         SHOW_LAYER = 53,
+        LAYER_ALPHA = 54,
         
         NEW_CANVAS_WIDTH = 100,
         NEW_CANVAS_HEIGHT = 101,
@@ -324,6 +325,15 @@ struct OptionInfo{
         WHOLE_VALUE = 4,
         TICK = 5
     };
+
+    using plain_textfield_t = std::string;
+    using hex_textfield_t = SDL_Color;
+    using slider_t = float;
+    using whole_textfield_t = int;
+    using choices_array_t = int;
+    using action_t = bool;
+    using tick_t = bool;
+
     using data_t = std::variant<std::monostate, std::string, SDL_Color, float, int, bool>;
 
     OptionIDs optionID; //Determines how the data should be handled

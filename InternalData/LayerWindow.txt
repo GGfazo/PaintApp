@@ -3,3 +3,4 @@
 51_A_OptionText/Remove Layer_
 52_S_SliderDigits/0_SliderMin/0_SliderMax/0_OptionText/Select Layer_InitialValue/0_
 53_T_OptionText/Show layer_InitialValue/T_
+54_S_SliderDigits/0_SliderMin/0_SliderMax/255_OptionText/Layer alpha_InitialValue/255

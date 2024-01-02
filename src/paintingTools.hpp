@@ -154,8 +154,11 @@ class MutableTexture{
 
     void AddLayer();
     bool DeleteCurrentLayer(); //Returns false if unable
+
     void SetLayerVisibility(bool visible); //Shows or hides the current layer based on the value of 'visible'
     bool GetLayerVisibility(); //Returns wether the current layer is drawn or not
+    void SetLayerAlpha(Uint8 alpha); //Sets the alpha mod of the current layer
+    Uint8 GetLayerAlpha(); //Returns the alpha mod of the current layer
 
     //Sets the selected layer to the chosen one clamped between 0 and the amount of layers minus 1
     void SetLayer(int nLayer);
@@ -272,6 +275,7 @@ class Canvas{
     void DeleteCurrentLayer(); //Makes sure the canvas isn't being drawn on and calls DeleteCurrentLayer method on the MutableTexture and saves this change to the undo chain
     void SetLayer(int nLayer); //Makes sure the canvas isn't being drawn on and calls SetLayer method on the MutableTexture
     void SetLayerVisibility(bool visible); //Makes sure the canvas isn't being drawn on and makes the current layer visible if 'visible' is true, 
+    void SetLayerAlpha(Uint8 alpha); //Makes sure the canvas isn't being drawn on and sets the alpha mod of the current layer
     MutableTexture *GetImage();
 
     template <typename T>
@@ -361,6 +365,7 @@ class Canvas{
 
         void SetOriginalLayer(SDL_Surface *pSurfaceToCopy, int surfaceLayer);
         void SetChange(SDL_Rect affectedRegion, SDL_Surface *pResultingSurface);
+        void ClearRedoData();
         void ClearData(); //Goes back to the initial state, except for the value of mMaxActionsAmount
         
         void SetLayerCreation(); //It's assumed that the layer created is the one passed to SetOriginalLayer
@@ -403,4 +408,5 @@ class Canvas{
     } mActionsManager;
 
     void UpdateRealPosition(){mRealPosition = {(float)mDimensions.x, (float)mDimensions.y};}
+    void UpdateLayerOptions(); //Should be called when the current layer has been changed
 };

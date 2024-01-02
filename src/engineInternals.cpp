@@ -878,6 +878,8 @@ void AppManager::ProcessWindowsData(){
 		}
 	};
 
+	//using OptionInfo;
+
 	for(int i = 0; i < mInternalWindows.size(); i++){
 		auto windowData = mInternalWindows[i]->GetData();
 
@@ -885,54 +887,54 @@ void AppManager::ProcessWindowsData(){
 		for(auto &option : windowData){
 			switch(option->optionID){
 				case OptionInfo::OptionIDs::DRAWING_COLOR:{
-					std::function<void(SDL_Color)>  fn = std::bind(&Canvas::SetColor, mpCanvas.get(), std::placeholders::_1);
+					std::function<void(OptionInfo::hex_textfield_t)>  fn = std::bind(&Canvas::SetColor, mpCanvas.get(), std::placeholders::_1);
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::HARD_OR_SOFT:{
-					auto mLambda = [this](bool toHard){
+					auto mLambda = [this](OptionInfo::tick_t toHard){
 						Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
 						if(canvasPencil) canvasPencil->SetPencilType(toHard ? Pencil::PencilType::HARD : Pencil::PencilType::SOFT);
 					};
-					std::function<void(bool)> fn = mLambda;
+					std::function<void(OptionInfo::tick_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::TOOL_RADIUS:{
-					auto mLambda = [this](float radius){
+					auto mLambda = [this](OptionInfo::slider_t radius){
 						mpCanvas->SetRadius((int)radius);
 					};
-					std::function<void(float)> fn = mLambda;
+					std::function<void(OptionInfo::slider_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::PENCIL_HARDNESS:{
 					Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
 					if(canvasPencil){
-						std::function<void(float)> fn = std::bind(&Pencil::SetHardness, canvasPencil, std::placeholders::_1);
+						std::function<void(OptionInfo::slider_t)> fn = std::bind(&Pencil::SetHardness, canvasPencil, std::placeholders::_1);
 						safeDataApply(option.get(), fn);
 					}
 					break;
 				}
 				case OptionInfo::OptionIDs::SOFT_ALPHA_CALCULATION:{
-					auto mLambda = [this](int alphaMode){
+					auto mLambda = [this](OptionInfo::choices_array_t alphaMode){
 						Pencil *canvasPencil = mpCanvas->GetTool<Pencil>();
 						if(canvasPencil) canvasPencil->SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(alphaMode));
 					};
-					std::function<void(int)> fn = mLambda;
+					std::function<void(OptionInfo::choices_array_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::CHOOSE_TOOL:{
-					auto mLambda = [this](int chosenTool){
+					auto mLambda = [this](OptionInfo::choices_array_t chosenTool){
 						mpCanvas->SetTool(static_cast<Canvas::Tool>(chosenTool));
 					};
-					std::function<void(int)> fn = mLambda;
+					std::function<void(OptionInfo::choices_array_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::ADD_LAYER:{
-					auto mLambda = [this](bool addLayer){
+					auto mLambda = [this](OptionInfo::action_t addLayer){
 						if(addLayer){
 							mpCanvas->AddLayer();
 							
@@ -943,12 +945,12 @@ void AppManager::ProcessWindowsData(){
 							ErrorPrint("ADD_LAYER data was false! (Should never happen)");
 						}
 					};
-					std::function<void(bool)> fn = mLambda;
+					std::function<void(OptionInfo::action_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::REMOVE_CURRENT_LAYER:{
-					auto mLambda = [this](bool deleteLayer){
+					auto mLambda = [this](OptionInfo::action_t deleteLayer){
 						if(deleteLayer){
 							mpCanvas->DeleteCurrentLayer();
 							
@@ -959,23 +961,31 @@ void AppManager::ProcessWindowsData(){
 							ErrorPrint("REMOVE_CURRENT_LAYER data was false! (Should never happen)");
 						}
 					};
-					std::function<void(bool)> fn = mLambda;
+					std::function<void(OptionInfo::action_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::SELECT_LAYER:{
-					auto mLambda = [this](float layer){
+					auto mLambda = [this](OptionInfo::slider_t layer){
 						mpCanvas->SetLayer((int)layer);
 					};
-					std::function<void(float)> fn = mLambda;
+					std::function<void(OptionInfo::slider_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::SHOW_LAYER:{
-					auto mLambda = [this](bool showLayer){
+					auto mLambda = [this](OptionInfo::tick_t showLayer){
 						mpCanvas->SetLayerVisibility(showLayer);
 					};
-					std::function<void(bool)> fn = mLambda;
+					std::function<void(OptionInfo::tick_t)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::LAYER_ALPHA:{
+					auto mLambda = [this](OptionInfo::slider_t layerAlpha){
+						mpCanvas->SetLayerAlpha((Uint8)layerAlpha);
+					};
+					std::function<void(OptionInfo::slider_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
@@ -990,7 +1000,7 @@ void AppManager::ProcessWindowsData(){
 					break;
 				}
 				case OptionInfo::OptionIDs::NEW_CANVAS_CREATE:{
-					auto mLambda = [this, &i](bool newCanvas){
+					auto mLambda = [this, &i](OptionInfo::action_t newCanvas){
 						if(!newCanvas){
 							ErrorPrint("NEW_CANVAS_CREATE data was false! (Should never happen)");
 						} else {
@@ -1016,51 +1026,51 @@ void AppManager::ProcessWindowsData(){
 							if(layerSelector) layerSelector->FetchInfo("SliderMax/"+std::to_string(mpCanvas->GetImage()->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer())+"_");
 						}
 					};
-					std::function<void(bool)> fn = mLambda;
+					std::function<void(OptionInfo::action_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::SAVING_NAME:{
-					auto mLambda = [this](std::string text){
+					auto mLambda = [this](OptionInfo::plain_textfield_t text){
 						if(text.empty()){
 							mpCanvas->SetSavePath("NewImage.png");
 						} else {
 							mpCanvas->SetSavePath((text + ".png").c_str());
 						}
 					};
-					std::function<void(std::string)> fn = mLambda;
+					std::function<void(OptionInfo::plain_textfield_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::PENCIL_DISPLAY_MAIN_COLOR:{
-					auto mLambda = [this](SDL_Color pencilDisplay){
+					auto mLambda = [this](OptionInfo::hex_textfield_t pencilDisplay){
 						mpCanvas->toolPreviewMainColor = pencilDisplay;
 					};
-					std::function<void(SDL_Color)> fn = mLambda;
+					std::function<void(OptionInfo::hex_textfield_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::PENCIL_DISPLAY_ALTERNATE_COLOR:{
-					auto mLambda = [this](SDL_Color pencilDisplay){
+					auto mLambda = [this](OptionInfo::hex_textfield_t pencilDisplay){
 						mpCanvas->toolPreviewAlternateColor = pencilDisplay;
 					};
-					std::function<void(SDL_Color)> fn = mLambda;
+					std::function<void(OptionInfo::hex_textfield_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::CANVAS_MOVEMENT_SPEED:{
-					auto mLambda = [this](int speed){
+					auto mLambda = [this](OptionInfo::whole_textfield_t speed){
 						mpCanvas->defaultMovementSpeed = speed;
 					};
-					std::function<void(int)> fn = mLambda;
+					std::function<void(OptionInfo::whole_textfield_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
 				case OptionInfo::OptionIDs::CANVAS_MOVEMENT_FAST_SPEED:{
-					auto mLambda = [this](int speed){
+					auto mLambda = [this](OptionInfo::whole_textfield_t speed){
 						mpCanvas->fastMovementSpeed = speed;
 					};
-					std::function<void(int)> fn = mLambda;
+					std::function<void(OptionInfo::whole_textfield_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}
