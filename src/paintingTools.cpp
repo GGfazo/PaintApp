@@ -315,7 +315,7 @@ void Pencil::ApplyOn(const std::span<SDL_Point> circleCenters, SDL_Color drawCol
 					FColor baseColor = {.r = actualColor.r/255.0f, .g = actualColor.g/255.0f, .b = actualColor.b/255.0f, .a = actualColor.a/255.0f};
 					appliedColor.a = (appliedAlpha*circleColor.a)/255.0f;
 					MutableTexture::ApplyColorToColor(baseColor, appliedColor);
-					*basePixel = SDL_MapRGBA(pSurfaceToModify->format, SDL_ALPHA_OPAQUE*baseColor.r, SDL_ALPHA_OPAQUE*baseColor.g, SDL_ALPHA_OPAQUE*baseColor.b, SDL_ALPHA_OPAQUE*baseColor.a);
+					*basePixel = SDL_MapRGBA(pSurfaceToModify->format, round(SDL_ALPHA_OPAQUE*baseColor.r), round(SDL_ALPHA_OPAQUE*baseColor.g), round(SDL_ALPHA_OPAQUE*baseColor.b), round(SDL_ALPHA_OPAQUE*baseColor.a));
 				}
 			}
 		}
@@ -492,6 +492,10 @@ void ColorPicker::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Col
 //MUTABLE TEXTURE METHODS:
 
 MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor){
+	mSelectedLayer = 0;
+	
+	mShowSurface.resize(1);
+	mShowSurface[mSelectedLayer] = true;
 	mpSurfaces.resize(1);
 	mpSurfaces[mSelectedLayer].reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
     mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width, height));
@@ -502,7 +506,10 @@ MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, S
 
 MutableTexture::MutableTexture(SDL_Renderer *pRenderer, const char *pImage){
 	SDL_Surface *loaded = IMG_Load(pImage);
+	mSelectedLayer = 0;
 	
+	mShowSurface.resize(1);
+	mShowSurface[mSelectedLayer] = true;
 	mpSurfaces.resize(1);
 	mpSurfaces[mSelectedLayer].reset(SDL_ConvertSurfaceFormat(loaded, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, 0));
     mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, loaded->w, loaded->h));
@@ -522,10 +529,12 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
 		if(validValue) *validValue = true;
 	}
 
-	SDL_Color pixelColor = {255, 255, 255, SDL_ALPHA_OPAQUE};
+	SDL_Color pixelColor = {255, 255, 255, SDL_ALPHA_TRANSPARENT};
 	
 	//We calculate the end displayed color
 	for(int i = 0; i < mpSurfaces.size(); ++i){
+		if(!mShowSurface[i]) continue;
+
 		SDL_Color auxiliar;
 		SDL_GetRGBA(*UnsafeGetPixel(pixel, i), mpSurfaces[i]->format, &auxiliar.r, &auxiliar.g, &auxiliar.b, &auxiliar.a);
 		ApplyColorToColor(pixelColor, auxiliar);
@@ -546,10 +555,10 @@ void MutableTexture::ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &ap
 
 	ApplyColorToColor(base, applied);
 
-	baseColor.r = SDL_ALPHA_OPAQUE*(base.r);
-	baseColor.g = SDL_ALPHA_OPAQUE*(base.g);
-	baseColor.b = SDL_ALPHA_OPAQUE*(base.b);
-	baseColor.a = SDL_ALPHA_OPAQUE*(base.a);
+	baseColor.r = round(SDL_ALPHA_OPAQUE*(base.r));
+	baseColor.g = round(SDL_ALPHA_OPAQUE*(base.g));
+	baseColor.b = round(SDL_ALPHA_OPAQUE*(base.b));
+	baseColor.a = round(SDL_ALPHA_OPAQUE*(base.a));
 }
 
 void MutableTexture::ApplyColorToColor(FColor &baseColor, const FColor &appliedColor){
@@ -627,14 +636,15 @@ void MutableTexture::UpdateTexture(const SDL_Rect &rect){
 	SDL_LockTextureToSurface(mpTexture.get(), &rect, &texturesSurface);
 	
 	SDL_FillRect(texturesSurface, nullptr, SDL_MapRGBA(texturesSurface->format, 255, 255, 255, SDL_ALPHA_TRANSPARENT));
-	for(const auto& surface : mpSurfaces){
-		SDL_BlitSurface(surface.get(), &rect, texturesSurface, nullptr);
+	for(size_t i = 0; i < mpSurfaces.size(); i++){
+		if(mShowSurface[i]) SDL_BlitSurface(mpSurfaces[i].get(), &rect, texturesSurface, nullptr);
 	}
 	
 	SDL_UnlockTexture(mpTexture.get());
 }
 
 void MutableTexture::AddLayer(){
+	mShowSurface.emplace(mShowSurface.begin()+mSelectedLayer+1, true);
 	mpSurfaces.emplace(mpSurfaces.begin()+mSelectedLayer+1, SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
     mSelectedLayer++;
 
@@ -654,12 +664,23 @@ bool MutableTexture::DeleteCurrentLayer(){
 	//Better safe than sorry
 	mSelectedLayer = std::clamp(mSelectedLayer, 0, (int)(mpSurfaces.size()-1));
 
+	mShowSurface.erase(mShowSurface.begin() + mSelectedLayer);
 	mpSurfaces.erase(mpSurfaces.begin() + mSelectedLayer);
 	
 	UpdateWholeTexture();
 	if(mSelectedLayer != 0) mSelectedLayer--;
 
 	return true;
+}
+
+void MutableTexture::SetLayerVisibility(bool visible){
+	mShowSurface[mSelectedLayer] = visible;
+
+	UpdateWholeTexture();
+}
+
+bool MutableTexture::GetLayerVisibility(){
+	return mShowSurface[mSelectedLayer];
 }
 
 void MutableTexture::SetLayer(int nLayer){
@@ -713,26 +734,11 @@ SDL_Rect MutableTexture::GetChangesRect(){
 		return {mChangedPixels[0].x, mChangedPixels[0].y, 1, 1};
 	}
 
-	int smallestX = INT_MAX, smallestY = INT_MAX, biggestX = INT_MIN, biggestY = INT_MIN;
-
-	for(const auto &pixel : mChangedPixels){
+	SDL_Rect changesRect = {0, 0, 0, 0};
+	
+	SDL_EnclosePoints(mChangedPixels.data(), mChangedPixels.size(), nullptr, &changesRect);
 		
-		if(pixel.x > biggestX){
-			biggestX = pixel.x;
-		}
-		if(pixel.x < smallestX){
-			smallestX = pixel.x;
-		}
-
-		if(pixel.y > biggestY){
-			biggestY = pixel.y;
-		}
-		if(pixel.y < smallestY){
-			smallestY = pixel.y;
-		}
-	}
-
-	return {smallestX, smallestY, 1+biggestX-smallestX, 1+biggestY-smallestY};
+	return changesRect;
 }
 
 
@@ -884,7 +890,7 @@ void Canvas::SetResolution(float nResolution){
 			mEraser.SetResolution(mResolution);
 			break;
 		case Tool::COLOR_PICKER:
-			ErrorPrint("mUsedTool shouldn't have the value "+std::to_string(static_cast<int>(mUsedTool))+ " when calling this method");
+			mColorPicker.SetResolution(mResolution);
 			break;
 		default:
 			ErrorPrint("mUsedTool can't have the value "+static_cast<int>(mUsedTool));
@@ -968,6 +974,7 @@ void Canvas::Undo(){
 
 			mpImage->DeleteCurrentLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			mActionsManager.UndoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
 			//We don't need to update the texture, since DeleteCurrentLayer already does it
@@ -981,7 +988,7 @@ void Canvas::Undo(){
 
 			mpImage->AddLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-
+			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			//Finally we set the surface to the deleted one
 			mActionsManager.UndoChange(mpImage->GetCurrentSurface(), &affectedRect);
@@ -1021,7 +1028,7 @@ void Canvas::Redo(){
 
 			mpImage->AddLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
-
+			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			//Finally we redo the surface
 			mActionsManager.RedoChange(mpImage->GetCurrentSurface(), &affectedRect);
@@ -1037,6 +1044,7 @@ void Canvas::Redo(){
 
 			mpImage->DeleteCurrentLayer();
 			AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+			AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 
 			mActionsManager.RedoChange(nullptr, nullptr); //This does nothing apart from decrementing the undo index
 			//We don't need to update the texture, since DeleteCurrentLayer already does it
@@ -1313,6 +1321,8 @@ void Canvas::AddLayer(){
 	//We can use GetCurrentSurface and GetLayer, since AddLayer also changes the current layer to the one just created
 	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
 	mActionsManager.SetLayerCreation();
+	
+	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 }
 
 void Canvas::DeleteCurrentLayer(){
@@ -1324,12 +1334,22 @@ void Canvas::DeleteCurrentLayer(){
 	if(mpImage->DeleteCurrentLayer()){
 		mActionsManager.SetLayerDestruction();
 	}
+
+	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
 }
 
 void Canvas::SetLayer(int nLayer){
 	if(mHolded) return; //We don't want to change the current layer if its being used
 
 	mpImage->SetLayer(nLayer);
+	
+	AppendCommand("53_T_InitialValue/"+std::string(mpImage->GetLayerVisibility() ? "T" : "F")+"_"); //Refers to the tick button SHOW_LAYER
+}
+
+void Canvas::SetLayerVisibility(bool visible){
+	if(mHolded) return; //We don't want to make the current layer visible or hiden
+
+	mpImage->SetLayerVisibility(visible);
 }
 
 MutableTexture *Canvas::GetImage(){
@@ -1363,7 +1383,7 @@ void Canvas::DisplayingHolder::Update(){
 	for(int squareX = 0; squareX < MAX_X_SQUARES; squareX++){
 		SDL_Rect squareRect = {squareX * SQUARE_SIZE + xOffset, yOffset, SQUARE_SIZE, SQUARE_SIZE};
 		for(int squareY = 0; squareY < MAX_Y_SQUARES; squareY++){
-			if(index == 1){
+			if(index == 1){ //We alternate between dark grey and light grey squares
 				index = 0;
 				darkGreySquares.push_back(squareRect);
 			} else {
@@ -1549,8 +1569,6 @@ bool Canvas::ActionsManager::RedoChange(SDL_Surface *pSurfaceToRedo, SDL_Rect *r
 
 void Canvas::ActionsManager::RotateUndoHistoryIfFull(){
 	if(mActionIndex+1 >= mMaxActionsAmount){
-		DebugPrint("Undo shifting");
-
 		//We rotate everything one to the left, putting the oldest action to the front
 		std::rotate(mChangedRects.begin(), mChangedRects.begin()+1, mChangedRects.end());
 		std::rotate(mInitialSurface.begin(), mInitialSurface.begin()+1, mInitialSurface.end());

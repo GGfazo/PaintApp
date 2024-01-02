@@ -153,8 +153,10 @@ class MutableTexture{
     void UpdateTexture(const SDL_Rect &rect);
 
     void AddLayer();
-    bool DeleteCurrentLayer(); //Returns false if unavble
-    
+    bool DeleteCurrentLayer(); //Returns false if unable
+    void SetLayerVisibility(bool visible); //Shows or hides the current layer based on the value of 'visible'
+    bool GetLayerVisibility(); //Returns wether the current layer is drawn or not
+
     //Sets the selected layer to the chosen one clamped between 0 and the amount of layers minus 1
     void SetLayer(int nLayer);
     int GetLayer();
@@ -174,6 +176,7 @@ class MutableTexture{
 
     //This is what stores the pixel data
     std::vector<std::unique_ptr<SDL_Surface, PointerDeleter>> mpSurfaces;
+    std::vector<bool> mShowSurface;
 
     //Formed by the compound of surfaces. It's what gets drawn into the screen
     std::unique_ptr<SDL_Texture, PointerDeleter> mpTexture;
@@ -268,6 +271,7 @@ class Canvas{
     void AddLayer(); //Makes sure the canvas isn't being drawn on and calls AddLayer method on the MutableTexture and saves this change to the undo chain
     void DeleteCurrentLayer(); //Makes sure the canvas isn't being drawn on and calls DeleteCurrentLayer method on the MutableTexture and saves this change to the undo chain
     void SetLayer(int nLayer); //Makes sure the canvas isn't being drawn on and calls SetLayer method on the MutableTexture
+    void SetLayerVisibility(bool visible); //Makes sure the canvas isn't being drawn on and makes the current layer visible if 'visible' is true, 
     MutableTexture *GetImage();
 
     template <typename T>

@@ -532,13 +532,13 @@ void AppManager::AddImage(const std::string &imagePath){
 	if(imageFormat == ".png"){
 		imageSize = GetSizeOfPNG(imagePath.c_str());
 		if(imageSize.x  <= 0 || imageSize.x > mMaximumWidth || imageSize.y <= 0 || imageSize.y > mMaximumHeight){
-			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check png corruption or app's maximum values)");
+			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check the app's maximum values and make sure the png isn't corrupted)");
 			return;
 		}
 	} else if (imageFormat == ".bmp"){
 		imageSize = GetSizeOfBMP(imagePath.c_str());
 		if(imageSize.x  <= 0 || imageSize.x > mMaximumWidth || imageSize.y <= 0 || imageSize.y > mMaximumHeight){
-			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check bmp corruption or app's maximum values)");
+			ErrorPrint(std::to_string(imageSize.x) + "x" + std::to_string(imageSize.y) + " are not valid dimensions (check the app's maximum values and make sure the png isn't corrupted)");
 			return;
 		}
 	} else {
@@ -968,6 +968,14 @@ void AppManager::ProcessWindowsData(){
 						mpCanvas->SetLayer((int)layer);
 					};
 					std::function<void(float)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::SHOW_LAYER:{
+					auto mLambda = [this](bool showLayer){
+						mpCanvas->SetLayerVisibility(showLayer);
+					};
+					std::function<void(bool)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}

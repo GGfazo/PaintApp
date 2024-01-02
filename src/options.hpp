@@ -304,6 +304,7 @@ struct OptionInfo{
         ADD_LAYER = 50,
         REMOVE_CURRENT_LAYER = 51,
         SELECT_LAYER = 52,
+        SHOW_LAYER = 53,
         
         NEW_CANVAS_WIDTH = 100,
         NEW_CANVAS_HEIGHT = 101,
