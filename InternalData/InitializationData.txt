@@ -3,10 +3,10 @@
 F:Vera.ttf
 
 #The maximum value for the width of the canvas
-W:1500
+W:3000
 
 #The maximum value for the height of the canvas
-H:1500
+H:3000
 
 #The amount of undo operations the program is allowed to save at the same time
 U:50

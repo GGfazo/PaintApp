@@ -298,6 +298,8 @@ struct OptionInfo{
         TOOL_RADIUS = 2,
         PENCIL_HARDNESS = 3,
         SOFT_ALPHA_CALCULATION = 4,
+        AREA_WRAP_AROUND = 5,
+        AREA_DRAW_OUTLINE = 6,
         
         CHOOSE_TOOL = 20,
 
@@ -389,7 +391,8 @@ class Option{
         NONE = 0x00,
         PENCIL_OPTION = 0x01,
         ERASER_OPTION = 0x02,
-        COLOR_PICKER_OPTION = 0x04
+        COLOR_PICKER_OPTION = 0x04,
+        AREA_DELIMITER_OPTION = 0x08
     };
 
     Option(int nTextWidth, SDL_Rect nDimensions, std::string_view nInfo = "");

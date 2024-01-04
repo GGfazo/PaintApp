@@ -758,9 +758,10 @@ void AppManager::InitializeWindow(const std::string &windowName){
 bool AppManager::HandleHotkeys(SDL_Event *pEvent){
 	if(pEvent->type == SDL_KEYDOWN){
 		switch(pEvent->key.keysym.sym){
-			case SDLK_r: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/0_"); return true;
-			case SDLK_f: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/1_"); return true;
-			case SDLK_v: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/2_"); return true;
+			case SDLK_1: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/0_"); return true;
+			case SDLK_2: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/1_"); return true;
+			case SDLK_3: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/2_"); return true;
+			case SDLK_4: FindOption(OptionInfo::OptionIDs::CHOOSE_TOOL)->FetchInfo("InitialValue/3_"); return true;
 			case SDLK_t: FindOption(OptionInfo::OptionIDs::SELECT_LAYER)->FetchInfo("InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer()+1)+"_"); return true;
 			case SDLK_g: FindOption(OptionInfo::OptionIDs::SELECT_LAYER)->FetchInfo("InitialValue/"+std::to_string(mpCanvas->GetImage()->GetLayer()-1)+"_"); return true;
 			case SDLK_SPACE: FindOption(OptionInfo::OptionIDs::ADD_LAYER)->FetchInfo("InitialValue/T_"); return true;
@@ -922,6 +923,27 @@ void AppManager::ProcessWindowsData(){
 						if(canvasPencil) canvasPencil->SetAlphaCalculation(static_cast<Pencil::AlphaCalculation>(alphaMode));
 					};
 					std::function<void(OptionInfo::choices_array_t)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::AREA_WRAP_AROUND:{
+					auto mLambda = [this](OptionInfo::tick_t wrapAround){
+						AreaDelimiter *areaDelimeter = mpCanvas->GetTool<AreaDelimiter>();
+						if(areaDelimeter) areaDelimeter->loopBack = wrapAround;
+					};
+					std::function<void(OptionInfo::tick_t)> fn = mLambda;
+					safeDataApply(option.get(), fn);
+					break;
+				}
+				case OptionInfo::OptionIDs::AREA_DRAW_OUTLINE:{
+					auto mLambda = [this](OptionInfo::action_t drawOutline){
+						if(drawOutline){
+							mpCanvas->ApplyAreaOutline();
+						} else {
+							ErrorPrint("ADD_LAYER data was false! (Should never happen)");
+						}
+					};
+					std::function<void(OptionInfo::action_t)> fn = mLambda;
 					safeDataApply(option.get(), fn);
 					break;
 				}

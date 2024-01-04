@@ -73,7 +73,7 @@ namespace tool_circle_data{
 		
 		SDL_Rect *rects = new SDL_Rect[mPreviewRects.size()];
 
-		for(int i = 0; i < mPreviewRects.size(); ++i){
+		for(size_t i = 0; i < mPreviewRects.size(); ++i){
 			rects[i] = mPreviewRects[i];
 			rects[i].x += center.x-((int)roundf(rectsResolution))/2;
 			rects[i].y += center.y-((int)roundf(rectsResolution))/2;
@@ -463,7 +463,6 @@ void Eraser::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color pr
 void ColorPicker::Activate(){
 	tool_circle_data::backgroundColor = {0, 0, 0, SDL_ALPHA_TRANSPARENT};
 	tool_circle_data::circleColor = {0, 0, 0, SDL_ALPHA_TRANSPARENT};
-	
 }
     
 void ColorPicker::GrabColor(Canvas *pCanvas, MutableTexture *pTexture, SDL_Point pixel){
@@ -496,6 +495,137 @@ void ColorPicker::DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Col
 	
 	SDL_RenderFillRect(pRenderer, &resultingRect);
 
+}
+
+//AREA DELIMITER METHODS:
+    
+void AreaDelimiter::Activate(){
+	tool_circle_data::backgroundColor = {0, 0, 0, SDL_ALPHA_TRANSPARENT};
+	tool_circle_data::circleColor = {0, 0, 0, SDL_ALPHA_TRANSPARENT};
+}
+
+bool AreaDelimiter::HandleEvent(SDL_Event *event, SDL_FPoint mousePoint){
+	if(event->type == SDL_MOUSEBUTTONDOWN){
+
+		SDL_FPoint *closestPoint = GetPoint(mousePoint);
+
+		if(closestPoint == nullptr){
+			mPoints.push_back(mousePoint);
+			mpSelectedPoint = &mPoints.back();
+		} else {
+			mpSelectedPoint = &(*closestPoint);
+		}
+		
+		mPointHolded = true;
+		return true;
+
+	} else if (event->type == SDL_MOUSEMOTION){
+		//We need to check that 'mpSelectedPoint' exists just in case the area was cleared while the point was still selected
+		if(mPointHolded && mpSelectedPoint) *mpSelectedPoint = mousePoint;
+	} else if (event->type == SDL_MOUSEBUTTONUP){
+		mPointHolded = false;
+	}
+	return false;
+}
+
+void AreaDelimiter::EraseSelected(){
+	if(mpSelectedPoint == nullptr || mPoints.empty()) return;
+	int index = std::distance(mPoints.data(), mpSelectedPoint);
+	mPoints.erase(mPoints.begin()+index);
+	
+	//'mpSelectedPoint' ends up pointing to the previous point, or the next one if at the beggining
+	index--;
+	if(index > 0){
+		mpSelectedPoint = mPoints.data()+std::max(index, 0); 
+	} else {
+		mpSelectedPoint = &mPoints.back();
+	}
+}
+
+void AreaDelimiter::AddBeforeSelected(){
+	if(mpSelectedPoint == nullptr || mPoints.empty()) return;
+	int index = std::distance(mPoints.data(), mpSelectedPoint);
+	mPoints.insert(mPoints.begin()+index+1, {mpSelectedPoint->x+0.75f, mpSelectedPoint->y+0.75f});
+	mpSelectedPoint = mPoints.data()+index+1; //'mpSelectedPoint' ends up pointing to the new point
+}
+
+void AreaDelimiter::Clear(){
+	mpSelectedPoint = nullptr;
+	mPoints.clear();
+}
+
+void AreaDelimiter::SetResolution(float nResolution){
+	tool_circle_data::rectsResolution = nResolution;
+}
+
+std::vector<SDL_FPoint> AreaDelimiter::GetPointsCopy(){
+	return mPoints;
+}
+
+void AreaDelimiter::DrawPreview(SDL_Point realOffset, SDL_Renderer *pRenderer, SDL_Color previewColor){
+	if(mPoints.empty()) return;
+
+	const int RECTS_SIZE = tool_circle_data::rectsResolution;
+	
+	if(RECTS_SIZE != 0){
+		SDL_Rect *rects = new SDL_Rect[mPoints.size()];
+
+		std::ranges::transform(mPoints, rects, [realOffset, RECTS_SIZE](const SDL_FPoint& point) {
+			SDL_Rect rect;
+			rect.x = tool_circle_data::rectsResolution*point.x - RECTS_SIZE/2+ realOffset.x;
+			rect.y = tool_circle_data::rectsResolution*point.y - RECTS_SIZE/2 + realOffset.y;
+			rect.w = RECTS_SIZE;
+			rect.h = RECTS_SIZE;
+			return rect;
+		});
+
+		SDL_SetRenderDrawColor(pRenderer, previewColor.r, previewColor.g, previewColor.b, previewColor.a);
+		SDL_RenderFillRects(pRenderer, rects, mPoints.size());
+
+		SDL_SetRenderDrawColor(pRenderer, 0, 0, 0, previewColor.a);
+		SDL_RenderDrawRect(pRenderer, rects + std::distance(mPoints.data(), mpSelectedPoint));
+
+		delete[] rects;
+	}
+}
+
+void AreaDelimiter::DrawArea(SDL_Point realOffset, SDL_Renderer *pRenderer, SDL_Color previewColor){
+	if(mPoints.size() <= 1) return;
+
+	SDL_SetRenderDrawColor(pRenderer, previewColor.r, previewColor.g, previewColor.b, previewColor.a);
+
+	SDL_Point *realPoints = new SDL_Point[mPoints.size()];
+
+	std::ranges::transform(mPoints, realPoints, [realOffset](const SDL_FPoint& point) {
+		SDL_Point realPoint;
+		realPoint.x = tool_circle_data::rectsResolution*point.x + realOffset.x;
+		realPoint.y = tool_circle_data::rectsResolution*point.y + realOffset.y;
+		return realPoint;
+	});
+
+	SDL_RenderDrawLines(pRenderer, realPoints, mPoints.size());
+	if(loopBack) SDL_RenderDrawLine(pRenderer, (realPoints+(mPoints.size()-1))->x, (realPoints+(mPoints.size()-1))->y, realPoints->x, realPoints->y);
+}
+
+SDL_FPoint *AreaDelimiter::GetPoint(SDL_FPoint &target){
+	constexpr float MIN_NEEDED_DISTANCE = 0.5f; //Half a pixel
+	float minDistance = std::hypot(MIN_NEEDED_DISTANCE, MIN_NEEDED_DISTANCE);
+	SDL_FPoint *closestPoint = nullptr;
+
+	for(auto it = mPoints.begin(); it != mPoints.end(); it++){
+		float xDistance = it->x - target.x;
+		float yDistance = it->y - target.y;
+		if(xDistance < MIN_NEEDED_DISTANCE && yDistance < MIN_NEEDED_DISTANCE){
+
+			float nDistance = std::hypot(xDistance, yDistance);
+			if(nDistance < minDistance){
+				minDistance = nDistance;
+				closestPoint = &*it;
+			}
+		}
+	}
+
+	return closestPoint;
 }
 
 //MUTABLE TEXTURE METHODS:
@@ -541,7 +671,7 @@ SDL_Color MutableTexture::GetPixelColor(SDL_Point pixel, bool *validValue){
 	SDL_Color pixelColor = {255, 255, 255, SDL_ALPHA_TRANSPARENT};
 	
 	//We calculate the end displayed color
-	for(int i = 0; i < mpSurfaces.size(); ++i){
+	for(size_t i = 0; i < mpSurfaces.size(); ++i){
 		if(!mShowSurface[i]) continue;
 
 		SDL_Color auxiliar;
@@ -730,8 +860,9 @@ bool MutableTexture::Save(const char *pSavePath){
 	std::unique_ptr<SDL_Surface, PointerDeleter> pSaveSurface(SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
 	SDL_FillRect(pSaveSurface.get(), nullptr, SDL_MapRGBA(pSaveSurface->format, 255, 255, 255, SDL_ALPHA_TRANSPARENT));
 
-	for(const auto& surface : mpSurfaces){
-		SDL_BlitSurface(surface.get(), nullptr, pSaveSurface.get(), nullptr);
+	for(size_t i = 0; i < mpSurfaces.size(); i++){
+		//Only the surfaces that are being shown get applied
+		if(mShowSurface[i]) SDL_BlitSurface(mpSurfaces[i].get(), nullptr, pSaveSurface.get(), nullptr);
 	}
 
 	if(IMG_SavePNG(pSaveSurface.get(), pSavePath)){
@@ -795,6 +926,7 @@ void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 	mActionsManager.ClearData();
 	mDimensions = {0, 0, nWidth, nHeight};
 	mDisplayingHolder.Update();
+	mAreaDelimiter.Clear();
 	UpdateRealPosition();
 }
 
@@ -803,6 +935,7 @@ void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
 	mActionsManager.ClearData();
 	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
 	mDisplayingHolder.Update();
+	mAreaDelimiter.Clear();
 	UpdateRealPosition();
 }
 
@@ -878,7 +1011,7 @@ void Canvas::DrawPixels(const std::vector<SDL_Point> &localPixels){
 	}
 
     mLastMousePixel = localPixels.back();
-	mActionsManager.pointTracker.push_back(mLastMousePixel);
+	mActionsManager.pointTracker.insert(mActionsManager.pointTracker.end(), localPixels.begin(), localPixels.end());
 }
 
 void Canvas::Clear(std::optional<SDL_Color> clearColor){
@@ -890,7 +1023,7 @@ void Canvas::Clear(std::optional<SDL_Color> clearColor){
 		mpImage->Clear(mDrawColor);
 	}
 	
-	mActionsManager.SetChange(SDL_Rect{0, 0, 100,  100}, mpImage->GetCurrentSurface());
+	mActionsManager.SetChange({0, 0, mpImage->GetWidth(), mpImage->GetHeight()}, mpImage->GetCurrentSurface());
 }
 
 void Canvas::SetSavePath(const char *nSavePath){
@@ -918,6 +1051,9 @@ void Canvas::SetResolution(float nResolution){
 		case Tool::COLOR_PICKER:
 			mColorPicker.SetResolution(mResolution);
 			break;
+		case Tool::AREA_DELIMITER:
+			mAreaDelimiter.SetResolution(mResolution);
+			break;
 		default:
 			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 			break;
@@ -937,20 +1073,34 @@ void Canvas::SetResolution(float nResolution){
 void Canvas::SetTool(Tool nUsedTool){
 	mUsedTool = nUsedTool;
 
-	//TODO: reading the commands from files is a temporal solution and while it isn't that this shouldn't be possible, but for achieving things like only having active
-	// certain kind of options inside a window, a TAGS system should be added, where options could be filtered by given tags
 	switch(mUsedTool){
 		case Tool::DRAW_TOOL:
 			mPencil.Activate(); 
-			AppendCommand(ReadFileToString("InternalData/ToolWindowPencil.txt"));
+			AppendCommand("T_"+std::to_string(std::to_underlying(Tool::ERASE_TOOL))+"_Active/F_\n" +
+						  "T_"+std::to_string(std::to_underlying(Tool::COLOR_PICKER))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::AREA_DELIMITER))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::DRAW_TOOL))+"_Active/T_");
 			break;
 		case Tool::ERASE_TOOL:
 			mEraser.Activate();
-			AppendCommand(ReadFileToString("InternalData/ToolWindowEraser.txt"));
+			AppendCommand("T_"+std::to_string(std::to_underlying(Tool::DRAW_TOOL))+"_Active/F_\n" +
+						  "T_"+std::to_string(std::to_underlying(Tool::COLOR_PICKER))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::AREA_DELIMITER))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::ERASE_TOOL))+"_Active/T_");
 			break;
 		case Tool::COLOR_PICKER:
 			mColorPicker.Activate();
-			AppendCommand(ReadFileToString("InternalData/ToolWindowColorpicker.txt"));
+			AppendCommand("T_"+std::to_string(std::to_underlying(Tool::DRAW_TOOL))+"_Active/F_\n" +
+						  "T_"+std::to_string(std::to_underlying(Tool::ERASE_TOOL))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::AREA_DELIMITER))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::COLOR_PICKER))+"_Active/T_");
+			break;
+		case Tool::AREA_DELIMITER:
+			mAreaDelimiter.Activate();
+			AppendCommand("T_"+std::to_string(std::to_underlying(Tool::DRAW_TOOL))+"_Active/F_\n" +
+						  "T_"+std::to_string(std::to_underlying(Tool::ERASE_TOOL))+"_Active/F_\n" + 
+						  "T_"+std::to_string(std::to_underlying(Tool::COLOR_PICKER))+"_Active/F_\n" +
+						  "T_"+std::to_string(std::to_underlying(Tool::AREA_DELIMITER))+"_Active/T_");
 			break;
 		default:
 			ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
@@ -958,6 +1108,47 @@ void Canvas::SetTool(Tool nUsedTool){
 			mPencil.Activate(); 
 			break;
 	}
+}
+
+void Canvas::ApplyAreaOutline(){
+	std::vector<SDL_Point> pixels {};
+	std::vector<SDL_FPoint> corners = mAreaDelimiter.GetPointsCopy();
+
+	if(corners.empty()) return;
+
+	for(int i = 0; i+1 < corners.size(); ++i){
+		std::vector<SDL_Point> segmentPoints = GetPointsInFSegment(corners[i], corners[i+1]);
+		pixels.insert(pixels.end(), segmentPoints.begin(), segmentPoints.end());
+	}
+
+	if(mAreaDelimiter.loopBack){
+		std::vector<SDL_Point> segmentPoints = GetPointsInFSegment(corners.back(), corners.front());
+		pixels.insert(pixels.end(), segmentPoints.begin(), segmentPoints.end());
+	}
+
+	Tool usedTool = mUsedTool;
+	SetTool(Tool::DRAW_TOOL);
+	
+	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+
+	DrawPixels(pixels);
+
+	SDL_FRect enclosingRect = {-1,-1,-1,-1};
+	SDL_Rect affectedRect;
+	SDL_EncloseFPoints(corners.data(), corners.size(), nullptr, &enclosingRect);
+	
+	int radius = GetRadius();
+
+	affectedRect.x = std::max((int)floorf(enclosingRect.x)+1-radius, 0);
+	affectedRect.y = std::max((int)floorf(enclosingRect.y)+1-radius, 0);
+	//To the width and heigth, we substract the offset of the x and y, so, for example, if 2 rows of pixels fell above the canvas, the height should be reduced by 2
+	affectedRect.w = std::min((int)ceilf(enclosingRect.w)+1+radius - (affectedRect.x - (int)floorf(enclosingRect.x)+1-radius), mpImage->GetWidth());
+	affectedRect.h = std::min((int)ceilf(enclosingRect.h)+1+radius - (affectedRect.y - (int)floorf(enclosingRect.y)+1-radius), mpImage->GetHeight());
+
+	mActionsManager.SetChange(affectedRect, mpImage->GetCurrentSurface());
+	mActionsManager.pointTracker.clear();
+
+	SetTool(usedTool);
 }
 
 void Canvas::AppendCommand(const std::string &nCommand){
@@ -1086,21 +1277,26 @@ void Canvas::HandleEvent(SDL_Event *event){
         SDL_Point mousePos = {event->button.x, event->button.y};
 		if(!SDL_PointInRect(&mousePos, &viewport)) return;
 
-		SDL_Point pixel = GetPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
-
 		switch(mUsedTool){
-			case Tool::DRAW_TOOL: case Tool::ERASE_TOOL:
+			case Tool::DRAW_TOOL: case Tool::ERASE_TOOL:{
 				mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
 
+				SDL_Point pixel = GetPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
 				DrawPixel(pixel);
 				
 				mHolded = true;
 				break;
-
-			case Tool::COLOR_PICKER:
+			}
+			case Tool::COLOR_PICKER:{
+				SDL_Point pixel = GetPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
 				mColorPicker.GrabColor(this, mpImage.get(), pixel);
 				break;
-
+			}	
+			case Tool::AREA_DELIMITER:{
+				SDL_FPoint relativePosition = GetRealPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
+				mHolded = mAreaDelimiter.HandleEvent(event, relativePosition);
+				break;
+			}
 			default:
 				ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 				break;
@@ -1129,6 +1325,11 @@ void Canvas::HandleEvent(SDL_Event *event){
 					DrawPixels(GetPointsInSegment(mLastMousePixel, pixel));
 					break;
 
+				case Tool::AREA_DELIMITER:
+					SDL_FPoint relativePosition = GetRealPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
+					mAreaDelimiter.HandleEvent(event, relativePosition);
+					break;
+
 				default:
 					ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 					break;
@@ -1139,6 +1340,11 @@ void Canvas::HandleEvent(SDL_Event *event){
 					DrawPixel(pixel);
 					break;
 
+				case Tool::AREA_DELIMITER:
+					SDL_FPoint relativePosition = GetRealPointCell({mousePos.x-(mDimensions.x+viewport.x), mousePos.y-(mDimensions.y+viewport.y)}, mResolution);
+					mAreaDelimiter.HandleEvent(event, relativePosition);
+					break;
+
 				default:
 					ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 					break;
@@ -1147,8 +1353,11 @@ void Canvas::HandleEvent(SDL_Event *event){
 	}
 	else if (event->type == SDL_MOUSEBUTTONUP){
 		mHolded = false;
-		
-		if(mActionsManager.pointTracker.size() != 0){
+
+		if(mUsedTool == Tool::AREA_DELIMITER){
+			mAreaDelimiter.HandleEvent(event, {-1, -1}); //This one doesn't really matter
+		}
+		else if(mActionsManager.pointTracker.size() != 0){
 			SDL_Rect enclosingRect = {-1,-1,-1,-1}, affectedRect;
 			SDL_EnclosePoints(mActionsManager.pointTracker.data(), mActionsManager.pointTracker.size(), nullptr, &enclosingRect);
 			
@@ -1180,6 +1389,9 @@ void Canvas::HandleEvent(SDL_Event *event){
 			case SDLK_q: SetResolution(mResolution-10.0f*M_MIN_RESOLUTION); break;
 			case SDLK_0: Undo(); break;
 			case SDLK_9: Redo(); break;
+			case SDLK_r: if(mUsedTool == Tool::AREA_DELIMITER && !mHolded) mAreaDelimiter.AddBeforeSelected(); break;
+			case SDLK_f: if(mUsedTool == Tool::AREA_DELIMITER && !mHolded) mAreaDelimiter.EraseSelected(); break;
+			case SDLK_c: if(mUsedTool == Tool::AREA_DELIMITER && !mHolded) mAreaDelimiter.Clear(); break;
 		}
 	}
 	else if (event->type == SDL_KEYUP){
@@ -1257,7 +1469,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		case Tool::DRAW_TOOL: case Tool::ERASE_TOOL:
 			enoughRadius = GetRadius() > 4;
 			break;
-		case Tool::COLOR_PICKER:
+		case Tool::COLOR_PICKER: case Tool::AREA_DELIMITER:
 			enoughRadius = true;
 			break;
 		default:
@@ -1265,6 +1477,9 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 			enoughRadius = false;
 			break;
 	}
+	
+	SDL_Color areaDelimiterColor = toolPreviewMainColor; //We don't use preview color because we don't want it to change based on the mouse position
+	areaDelimiterColor.a = 50;
 
 	if(enoughRadius || !mHolded){
 		SDL_Point mousePosition;
@@ -1288,9 +1503,9 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		*/
 
 		//We find the middle pixel
-		SDL_Point mouseToCanvas = {mousePosition.x-(std::max(mDimensions.x, 0)+viewport.x), mousePosition.y-(std::max(mDimensions.y, 0)+viewport.y)};
+		SDL_Point mouseToCanvas = {mousePosition.x-nViewport.x, mousePosition.y-nViewport.y};
 		previewColor.a = 50;
-		
+
 		switch(mUsedTool){
 			case Tool::DRAW_TOOL:
 				mPencil.DrawPreview(mouseToCanvas, pRenderer, previewColor);
@@ -1301,11 +1516,18 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 			case Tool::COLOR_PICKER:
 				mColorPicker.DrawPreview(mouseToCanvas, pRenderer, previewColor);
 				break;
+			case Tool::AREA_DELIMITER:
+				SDL_RenderSetViewport(pRenderer, &viewport);
+				mAreaDelimiter.DrawPreview({mDimensions.x, mDimensions.y}, pRenderer, areaDelimiterColor);
+				break;
 			default:
 				ErrorPrint("mUsedTool can't have the value "+std::to_string(static_cast<int>(mUsedTool)));
 				break;
 		};
 	}
+
+	SDL_RenderSetViewport(pRenderer, &viewport);
+	mAreaDelimiter.DrawArea({mDimensions.x, mDimensions.y}, pRenderer, areaDelimiterColor);
 
 	SDL_RenderSetViewport(pRenderer, nullptr);
 }

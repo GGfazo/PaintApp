@@ -1039,10 +1039,10 @@ bool Option::HasAnyTag(Tag tags){
 
 Option::Tag Option::PrimitiveToTag(unsigned int primitive){
 	switch(primitive){
-		case 0: return Tag::NONE;
-		case 1: return Tag::PENCIL_OPTION;
-		case 2: return Tag::ERASER_OPTION;
-		case 3: return Tag::COLOR_PICKER_OPTION;
+		case 0: return Tag::PENCIL_OPTION;
+		case 1: return Tag::ERASER_OPTION;
+		case 2: return Tag::COLOR_PICKER_OPTION;
+		case 3: return Tag::AREA_DELIMITER_OPTION;
 		default: ErrorPrint("The tag "+std::to_string(primitive)+" doesn't exist"); return Tag::NONE;
 	}
 }

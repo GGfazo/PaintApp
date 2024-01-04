@@ -1,6 +1,0 @@
-#We set unactive those options that have other tags
-T_2_Active/F_
-T_3_Active/F_
-
-#Finally, we set the ones with the Pencil tag active
-T_1_Active/T_

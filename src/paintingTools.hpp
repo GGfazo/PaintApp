@@ -24,6 +24,11 @@ inline SDL_Point GetPointCell(SDL_Point originalPoint, float cellSize){
     return {(int)std::floor(originalPoint.x/cellSize), (int)std::floor(originalPoint.y/cellSize)};
 }
 
+//Use when sub pixels are required
+inline SDL_FPoint GetRealPointCell(SDL_Point originalPoint, float cellSize){
+    return {originalPoint.x/cellSize, originalPoint.y/cellSize};
+}
+
 //Provides a general space where the currently used tool (if needed, e.g: Pencil, Eraser, Fader) can store data 
 //and achieve common results (basically having the same preview rects or circle for the same radius)
 namespace tool_circle_data{
@@ -117,10 +122,45 @@ struct ColorPicker{
 
     void GrabColor(Canvas *pCanvas, MutableTexture *pTexture, SDL_Point pixel);
 
-    //Only affects the preview display, has no effect on the value of ApplyOn. Calls UpdatePreviewRects
+    //Only affects the preview display, has no effect on the value of ApplyOn.
     void SetResolution(float nResolution);
 
     void DrawPreview(SDL_Point center, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE});
+};
+
+//Delimiters the currentl area that can be modified
+struct AreaDelimiter{
+    bool loopBack = true; //If true, the points wrap around
+
+    void Activate();
+
+    //Handles mouse related events
+    bool HandleEvent(SDL_Event *event, SDL_FPoint mousePoint);
+    
+    //Erases the selected point
+    void EraseSelected();
+
+    //Adds a point after the selected
+    void AddBeforeSelected();
+
+    void Clear();
+
+    //Only affects the preview display, has no effect on the value of ApplyOn.
+    void SetResolution(float nResolution);
+
+    std::vector<SDL_FPoint> GetPointsCopy();
+
+    void DrawPreview(SDL_Point realOffset, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE}); //Draws a preview of the delimited area, representing the points with rects
+    void DrawArea(SDL_Point realOffset, SDL_Renderer *pRenderer, SDL_Color previewColor = {0, 0, 0, SDL_ALPHA_OPAQUE}); //Draws a representation of the delimited area with lines for the conextions
+
+    private:
+
+    std::vector<SDL_FPoint> mPoints;
+    SDL_FPoint *mpSelectedPoint = nullptr;
+    bool mPointHolded = false;
+
+    //Returns the closest point to the target with its distance, or nullptr if such point is too far
+    SDL_FPoint *GetPoint(SDL_FPoint &target);
 };
 
 class MutableTexture{
@@ -211,7 +251,8 @@ class Canvas{
     enum class Tool : int{
         DRAW_TOOL = 0,
         ERASE_TOOL = 1,
-        COLOR_PICKER = 2
+        COLOR_PICKER = 2,
+        AREA_DELIMITER = 3
     };
 
     static int maxAmountOfUndoActionsSaved; //This is only used in Canvas creation
@@ -250,6 +291,9 @@ class Canvas{
     void SetOffset(int offsetX, int offsetY);
     void SetResolution(float nResolution);
     void SetTool(Tool nUsedTool);
+    
+    //Uses the data inside 'mAreaDelimiter' with the 'mPencil'
+    void ApplyAreaOutline();
 
     void AppendCommand(const std::string &nCommand);
     std::string GiveCommands();
@@ -279,7 +323,7 @@ class Canvas{
     MutableTexture *GetImage();
 
     template <typename T>
-    T *GetTool(){
+    constexpr T *GetTool(){
         switch(mUsedTool){
             case Tool::DRAW_TOOL:
                 if constexpr (std::is_same<T, decltype(mPencil)>::value) return &mPencil;
@@ -289,6 +333,9 @@ class Canvas{
                 else return nullptr;
             case Tool::COLOR_PICKER:
                 if constexpr (std::is_same<T, decltype(mColorPicker)>::value) return &mColorPicker;
+                else return nullptr;
+            case Tool::AREA_DELIMITER:
+                if constexpr (std::is_same<T, decltype(mAreaDelimiter)>::value) return &mAreaDelimiter;
                 else return nullptr;
             default:
                 return nullptr;
@@ -300,6 +347,7 @@ class Canvas{
     Pencil mPencil;
     Eraser mEraser;
     ColorPicker mColorPicker;
+    AreaDelimiter mAreaDelimiter;
 
     SDL_Rect mDimensions;
     static constexpr float M_MIN_RESOLUTION = 0.01f, M_MAX_RESOLUTION = 100.0f;

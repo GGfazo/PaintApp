@@ -423,43 +423,48 @@ bool FRectOutsideFRect(SDL_FRect &rect1, SDL_FRect &rect2){
 }
 
 std::vector<SDL_Point> GetPointsInSegment(SDL_Point initialPoint, SDL_Point finalPoint){
+	return GetPointsInFSegment(SDL_FPoint{(float)initialPoint.x, (float)initialPoint.y}, SDL_FPoint{(float)finalPoint.x, (float)finalPoint.y});
+}
+
+std::vector<SDL_Point> GetPointsInFSegment(SDL_FPoint initialPoint, SDL_FPoint finalPoint){
+
 	std::vector<SDL_Point> result;
 
-	int xDif = std::abs(initialPoint.x-finalPoint.x), yDif = std::abs(initialPoint.y-finalPoint.y);
+	float xDif = std::abs(initialPoint.x-finalPoint.x), yDif = std::abs(initialPoint.y-finalPoint.y);
 
 	if(xDif > yDif){
-		result.reserve(xDif);
+		result.reserve((int)ceilf(xDif));
 
-		float yGrowth = (finalPoint.y-initialPoint.y)/(float)xDif;
+		float yGrowth = (finalPoint.y-initialPoint.y)/xDif;
 		float y = (float)initialPoint.y;
 
 		if(initialPoint.x < finalPoint.x){
-			for(int x = initialPoint.x; x <= finalPoint.x; ++x){
-				result.emplace_back(x, (int)y);
+			for(float x = initialPoint.x; x <= finalPoint.x; ++x){
+				result.emplace_back((int)x, (int)y);
 
 				y += yGrowth;
 			}
 		} else {
-			for(int x = initialPoint.x; x >= finalPoint.x; --x){
-				result.emplace_back(x, (int)y);
+			for(float x = initialPoint.x; x >= finalPoint.x; --x){
+				result.emplace_back((int)x, (int)y);
 
 				y += yGrowth;
 			}
 		}
 
 	} else {
-		result.reserve(yDif);
+		result.reserve((int)ceilf(yDif));
 		float xGrowth = (finalPoint.x-initialPoint.x)/(float)yDif;
 		float x = (float)initialPoint.x;
 		if(initialPoint.y < finalPoint.y){
-			for(int y = initialPoint.y; y <= finalPoint.y; ++y){
-				result.emplace_back((int)x, y);
+			for(float y = initialPoint.y; y <= finalPoint.y; ++y){
+				result.emplace_back((int)x, (int)y);
 
 				x += xGrowth;
 			}
 		} else {
-			for(int y = initialPoint.y; y >= finalPoint.y; --y){
-				result.emplace_back((int)x, y);
+			for(float y = initialPoint.y; y >= finalPoint.y; --y){
+				result.emplace_back((int)x, (int)y);
 
 				x += xGrowth;
 			}

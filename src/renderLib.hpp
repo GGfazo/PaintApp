@@ -144,6 +144,10 @@ bool FRectOutsideFRect(SDL_FRect &rect1, SDL_FRect &rect2);
 //The points returned have a unique x or y coordinate each (depending on the segment's slope)
 std::vector<SDL_Point> GetPointsInSegment(SDL_Point initialPoint, SDL_Point finalPoint); 
 
+//Returns a series of points, that belong in the segment defined by the passed points.
+//The points returned have a unique x or y coordinate each (depending on the segment's slope)
+std::vector<SDL_Point> GetPointsInFSegment(SDL_FPoint initialPoint, SDL_FPoint finalPoint); 
+
 //Returns true only if both x values and y values are equal (e.g. (10,12) == (10,12) => true)
 bool ArePointsEqual(const SDL_Point &point1, const SDL_Point &point2);
 
