@@ -123,6 +123,8 @@ class MainBar{
 
     MainBar(SDL_Rect nDimensions);
 
+    void SetWidth(int nWidth);
+
     bool HandleEvent(SDL_Event *pEvent);
     void Draw(SDL_Renderer *pRenderer);
 

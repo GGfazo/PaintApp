@@ -169,9 +169,14 @@ class MutableTexture{
     MutableTexture(SDL_Renderer *pRenderer, int width, int height, SDL_Color fillColor = {255, 255, 255, SDL_ALPHA_OPAQUE});
     MutableTexture(SDL_Renderer *pRenderer, const char *pImage);
 
+    void AddFileAsLayer(SDL_Renderer *pRenderer, const char *pImage, SDL_Point imageSize);
+
     SDL_Color GetPixelColor(SDL_Point pixel, bool *validValue = nullptr);
 
     void Clear(const SDL_Color &clearColor);
+
+    //The renderer is needed in order that the SDL_Texture can also be resized
+    void ResizeAllLayers(SDL_Renderer *pRenderer, SDL_Point nSize);
 
     static void ApplyColorToColor(SDL_Color &baseColor, const SDL_Color &appliedColor);
     static void ApplyColorToColor(FColor &baseColor, const FColor &appliedColor);
@@ -274,7 +279,7 @@ class Canvas{
     ~Canvas();
 
     void Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight);
-    void OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile);
+    void OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile, SDL_Point imageSize);
 
     SDL_Color GetColor();
     void SetColor(SDL_Color nDrawColor);
@@ -382,6 +387,7 @@ class Canvas{
     //Holds data used during the display of the canvas, so that it doesn't have to be calculated each time 'DrawIntoRenderer' is called
     //Should be updated each time 'mDimensions' changes
     struct DisplayingHolder{
+        DisplayingHolder() = default;
         DisplayingHolder(Canvas *npOwner);
         void Update();
 

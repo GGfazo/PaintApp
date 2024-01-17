@@ -434,6 +434,10 @@ MainBar::MainBar(SDL_Rect nDimensions) : mDimensions(nDimensions){
 	mMainOptions.push_back(MainOption(selectionDimensions, "PREFERENCES"));
 }
  
+void MainBar::SetWidth(int nWidth){
+	mDimensions.w = nWidth;
+}
+
 bool MainBar::HandleEvent(SDL_Event *pEvent){
 	if(pEvent->type == SDL_MOUSEBUTTONDOWN){
 		SDL_Point mousePos = {pEvent->button.x, pEvent->button.y};
@@ -509,6 +513,7 @@ AppManager::AppManager(int nWidth, int nHeight, Uint32 nFlags, const char* pWind
     }
 
     mpRenderer.reset(SDL_CreateRenderer(mpWindow.get(), -1, SDL_RENDERER_ACCELERATED));// | SDL_RENDERER_PRESENTVSYNC ));
+	SDL_RenderSetLogicalSize(mpRenderer.get(), mWidth, mHeight);
 
 	InitializeFromFile();
 	Option::SetOptionsFont(mpFont);
@@ -546,7 +551,7 @@ void AppManager::AddImage(const std::string &imagePath){
 		return;
 	}
 
-	mpCanvas->OpenFile(mpRenderer.get(), imagePath.c_str());
+	mpCanvas->OpenFile(mpRenderer.get(), imagePath.c_str(), imageSize);
 	mpCanvas->CenterInViewport();
 	mpCanvas->SetResolution(std::min(mWidth/(float)mpCanvas->GetImageSize().x, (mHeight-mMainBarHeight)/(float)mpCanvas->GetImageSize().y)*0.9f);
 }
@@ -581,7 +586,23 @@ void AppManager::HandleEvent(SDL_Event *event){
 		const char* sourceDir = event->drop.file;
 		AddImage(sourceDir);
 		return;
-    }
+    } else if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED){
+		SDL_Point nSize, relativeSize;
+		
+		SDL_GetWindowSize(mpWindow.get(), &nSize.x, &nSize.y);
+		bool horizontalStretch = ((nSize.x*mHeight) > (nSize.y*mWidth));
+		if(horizontalStretch){
+			relativeSize = {(int)ceilf(nSize.x * ((float)mHeight)/nSize.y), mHeight};
+		} else {
+			relativeSize = {mWidth, (int)ceilf(nSize.y * ((float)mWidth)/nSize.x)};
+		}
+
+		mpCanvas->viewport.w = relativeSize.x;
+		mpCanvas->viewport.h = relativeSize.y - mMainBarHeight;
+		mpMainBar->SetWidth(relativeSize.x);
+		mpCanvas->CenterInViewport();
+		return;
+	}
 
 	//Just makes sure that the text input stops when any non text field is clicked
 	TextInputManager::HandleEvent(event);

@@ -638,6 +638,7 @@ MutableTexture::MutableTexture(SDL_Renderer *pRenderer, int width, int height, S
 	mpSurfaces.resize(1);
 	mpSurfaces[mSelectedLayer].reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
     mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width, height));
+	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
 
 	Clear(fillColor);
@@ -652,10 +653,35 @@ MutableTexture::MutableTexture(SDL_Renderer *pRenderer, const char *pImage){
 	mpSurfaces.resize(1);
 	mpSurfaces[mSelectedLayer].reset(SDL_ConvertSurfaceFormat(loaded, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, 0));
     mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, loaded->w, loaded->h));
+	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
 
     SDL_FreeSurface(loaded);
 	
+	UpdateWholeTexture();
+}
+
+void MutableTexture::AddFileAsLayer(SDL_Renderer *pRenderer, const char *pImage, SDL_Point imageSize){
+	SDL_Point currentSize = {GetWidth(), GetHeight()};
+	SDL_Point finalSize = {std::max(currentSize.x, imageSize.x), std::max(currentSize.y, imageSize.y)};
+
+	//If the final size differs from the previous size, we need to resize all existing layers
+	if(finalSize.x != currentSize.x || finalSize.y != currentSize.y) ResizeAllLayers(pRenderer, finalSize);
+	AddLayer();
+
+	SDL_Surface *loaded = IMG_Load(pImage);
+
+	//If the final size differs from the image's size, we just blit it onto the new layer. Otherwise we just set the layer directly
+	if(finalSize.x != imageSize.x || finalSize.y != imageSize.y){
+		SDL_SetSurfaceBlendMode(loaded, SDL_BLENDMODE_NONE);
+		SDL_BlitSurface(loaded, nullptr, mpSurfaces[mSelectedLayer].get(), nullptr);
+	} else {
+		mpSurfaces[mSelectedLayer].reset(loaded);
+	}
+	
+	mShowSurface[mSelectedLayer] = true;
+	
+	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	UpdateWholeTexture();
 }
 
@@ -690,6 +716,24 @@ void MutableTexture::Clear(const SDL_Color &clearColor){
 	//Currently only clears the current layer
 	SDL_FillRect(mpSurfaces[mSelectedLayer].get(), nullptr, SDL_MapRGBA(mpSurfaces[mSelectedLayer]->format, clearColor.r, clearColor.g, clearColor.b, clearColor.a));
 
+	UpdateWholeTexture();
+}
+
+void MutableTexture::ResizeAllLayers(SDL_Renderer *pRenderer, SDL_Point nSize){
+	for(auto& pSurface : mpSurfaces){
+		SDL_Surface *nSurface = SDL_CreateRGBSurfaceWithFormat(0, nSize.x, nSize.y, 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888);
+		SDL_FillRect(nSurface, nullptr, SDL_MapRGBA(nSurface->format, 255, 255, 255, 0));
+		SDL_SetSurfaceBlendMode(nSurface, SDL_BLENDMODE_BLEND);
+		SDL_SetSurfaceBlendMode(pSurface.get(), SDL_BLENDMODE_NONE);
+		
+		SDL_BlitSurface(pSurface.get(), nullptr, nSurface, nullptr);
+
+		pSurface.reset(nSurface);
+	}
+
+	//Finally we also need to resize the texture
+    mpTexture.reset(SDL_CreateTexture(pRenderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, nSize.x, nSize.y));
+	SDL_SetTextureBlendMode(mpTexture.get(), SDL_BLENDMODE_BLEND);
 	UpdateWholeTexture();
 }
 
@@ -791,11 +835,10 @@ void MutableTexture::AddLayer(){
 	mShowSurface.emplace(mShowSurface.begin()+mSelectedLayer+1, true);
 	mpSurfaces.emplace(mpSurfaces.begin()+mSelectedLayer+1, SDL_CreateRGBSurfaceWithFormat(0, GetWidth(), GetHeight(), 32, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBA8888));
     mSelectedLayer++;
-
-	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	
 	//Currently all new layers are created with no colors
 	Clear({255, 255, 255, SDL_ALPHA_TRANSPARENT});
+	SDL_SetSurfaceBlendMode(mpSurfaces[mSelectedLayer].get(), SDL_BLENDMODE_BLEND);
 	UpdateWholeTexture();
 }
 
@@ -925,18 +968,23 @@ void Canvas::Resize(SDL_Renderer *pRenderer, int nWidth, int nHeight){
 	mpImage.reset(new MutableTexture(pRenderer, nWidth, nHeight));
 	mActionsManager.ClearData();
 	mDimensions = {0, 0, nWidth, nHeight};
+	UpdateRealPosition();
 	mDisplayingHolder.Update();
 	mAreaDelimiter.Clear();
-	UpdateRealPosition();
 }
 
-void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile){
-	mpImage.reset(new MutableTexture(pRenderer, pLoadFile));
-	mActionsManager.ClearData();
-	mDimensions = {0, 0, mpImage->GetWidth(), mpImage->GetHeight()};
-	mDisplayingHolder.Update();
-	mAreaDelimiter.Clear();
+void Canvas::OpenFile(SDL_Renderer *pRenderer, const char *pLoadFile, SDL_Point imageSize){
+	mpImage->AddFileAsLayer(pRenderer, pLoadFile, imageSize);
+	AppendCommand("52_S_SliderMax/"+std::to_string(mpImage->GetTotalLayers()-1)+"_InitialValue/"+std::to_string(mpImage->GetLayer())+"_"); //Refers to the slider SELECT_LAYER
+	UpdateLayerOptions();
+
+	//We can use GetCurrentSurface and GetLayer, since AddLayer also changes the current layer to the one just created
+	mActionsManager.SetOriginalLayer(mpImage->GetCurrentSurface(), mpImage->GetLayer());
+	mActionsManager.SetLayerCreation();
+	
+	mDimensions = {0, 0, imageSize.x, imageSize.y};
 	UpdateRealPosition();
+	mDisplayingHolder.Update();
 }
 
 SDL_Color Canvas::GetColor(){
@@ -1482,13 +1530,17 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 	areaDelimiterColor.a = 50;
 
 	if(enoughRadius || !mHolded){
-		SDL_Point mousePosition;
-		SDL_GetMouseState(&mousePosition.x, &mousePosition.y);
+		SDL_Point rawMousePosition;
+		SDL_GetMouseState(&rawMousePosition.x, &rawMousePosition.y);
+		
+		SDL_FPoint mousePosition;
+		SDL_RenderWindowToLogical(pRenderer, rawMousePosition.x, rawMousePosition.y, &mousePosition.x, &mousePosition.y);
+
 		SDL_Rect nViewport = {viewport.x + std::max(mDimensions.x, 0), viewport.y + std::max(mDimensions.y, 0), std::min(mDimensions.w, viewport.w), std::min(mDimensions.h, viewport.h)};
 		SDL_RenderSetViewport(pRenderer, &nViewport);
 
 		//We find the middle pixel
-		SDL_Point pixel = GetPointCell({mousePosition.x-viewport.x-mDimensions.x, mousePosition.y-viewport.y-mDimensions.y}, mResolution);
+		SDL_Point pixel = GetPointCell({(int)mousePosition.x-viewport.x-mDimensions.x, (int)mousePosition.y-viewport.y-mDimensions.y}, mResolution);
 		
 		SDL_Color previewColor = toolPreviewMainColor;
 		bool validColor = true;
@@ -1503,7 +1555,7 @@ void Canvas::DrawIntoRenderer(SDL_Renderer *pRenderer){
 		*/
 
 		//We find the middle pixel
-		SDL_Point mouseToCanvas = {mousePosition.x-nViewport.x, mousePosition.y-nViewport.y};
+		SDL_Point mouseToCanvas = {(int)mousePosition.x - nViewport.x  + viewport.x, (int)mousePosition.y - nViewport.y + viewport.y};
 		previewColor.a = 50;
 
 		switch(mUsedTool){
@@ -1626,7 +1678,7 @@ void Canvas::DisplayingHolder::Update(){
 
 	int xOffset = std::min(dimensions.x, 0), yOffset = std::min(dimensions.y, 0);
 	SDL_IntersectRect(&dimensions, &viewport, &squaresViewport);
-	squaresViewport = {viewport.x + std::max(dimensions.x, 0), viewport.y + std::max(dimensions.y, 0), std::min(dimensions.w, viewport.w) + xOffset, std::min(dimensions.h, viewport.h) + yOffset};
+	squaresViewport = {std::max(dimensions.x, 0) + viewport.x, std::max(dimensions.y, 0) + viewport.y, dimensions.w + xOffset, dimensions.h + yOffset};
 
 	const int MAX_X_SQUARES = 10, MAX_Y_SQUARES = ceil(MAX_X_SQUARES*dimensions.h*1.0f/dimensions.w), SQUARE_SIZE = ceil(dimensions.w*1.0f/MAX_X_SQUARES);
 
@@ -1649,7 +1701,7 @@ void Canvas::DisplayingHolder::Update(){
 
 			squareRect.y += SQUARE_SIZE;
 		}
-		index++; //Causes the greys to alternate
+		if(MAX_Y_SQUARES%2 == 0) index++; //Causes the greys to alternate
 	}
 }
 
